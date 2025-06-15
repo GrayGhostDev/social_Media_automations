@@ -5,13 +5,19 @@
   "scripts": {
     "build:custom": "cd custom && tsc",
     "test:nodes": "jest custom/nodes/**/*.test.js",
+    "test:functions": "jest custom/functions/**/*.test.js",
+    "test": "jest",
     "lint": "eslint custom/**/*.js custom/**/*.ts",
+    "format": "prettier --write custom/**/*.{js,ts}",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:rebuild": "docker compose up --build -d",
+    "docker:logs": "docker compose logs -f",
     "logs": "docker compose logs -f n8n",
-    "init:db": "docker compose exec postgres psql -U n8n_user -d n8n_db -f /scripts/init-database.sql",
-    "init:mcp": "docker compose exec proxy /scripts/n8n-mcp-onboard.sh"
+    "init:db": "docker compose exec postgres psql -U n8n_user -d n8n_db -f /scripts/init-database.sql && docker compose exec postgres psql -U n8n_user -d n8n_db -f /scripts/init-analytics-tables.sql",
+    "init:mcp": "docker compose exec proxy /scripts/n8n-mcp-onboard.sh",
+    "deploy:check": "./scripts/pre-deploy-check.sh",
+    "update:deps": "./scripts/update-dependencies.sh"
   },
   "repository": {
     "type": "git",
@@ -22,14 +28,56 @@
     "automation",
     "social-media",
     "ai",
-    "mcp"
+    "mcp",
+    "viral-content",
+    "tensorflow"
   ],
   "author": "Gray Ghost Dev",
   "license": "MIT",
+  "dependencies": {
+    "@tensorflow/tfjs": "^4.15.0",
+    "@tensorflow/tfjs-node": "^4.15.0",
+    "ajv": "^8.12.0",
+    "axios": "^1.6.0",
+    "crypto-js": "^4.2.0",
+    "lodash": "^4.17.21",
+    "moment": "^2.29.4",
+    "moment-timezone": "^0.5.43",
+    "string-similarity": "^4.0.4",
+    "cheerio": "^1.0.0-rc.12",
+    "natural": "^6.10.0",
+    "stopword": "^2.0.8"
+  },
   "devDependencies": {
     "@types/node": "^20.10.0",
+    "@types/lodash": "^4.14.202",
+    "@types/string-similarity": "^4.0.2",
+    "@types/crypto-js": "^4.2.1",
     "typescript": "^5.3.0",
     "jest": "^29.7.0",
-    "eslint": "^8.54.0"
+    "@jest/globals": "^29.7.0",
+    "eslint": "^8.54.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-node": "^11.1.0",
+    "prettier": "^3.1.1",
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "n8n": {
+    "customNodes": [
+      "custom/nodes/ViralityPredictor/ViralityPredictor.node.ts"
+    ],
+    "customFunctions": [
+      "custom/functions/viralScore.js",
+      "custom/functions/contentModeration.js",
+      "custom/functions/deduplication.js",
+      "custom/functions/mcpRouter.js",
+      "custom/functions/aiRouter.js",
+      "custom/functions/promptSelector.js",
+      "custom/functions/smartScheduler.js"
+    ]
   }
 }

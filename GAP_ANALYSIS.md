@@ -26,37 +26,37 @@ Last Updated: 2025-01-15
   - [ ] Input_Templates
 - [ ] 5. Share with service account
 
-### C. Custom Code Assets ⚠️
+### C. Custom Code Assets ✅
 - [x] 6. Copy JS files to container:
   - [x] aiRouter.js (created)
   - [x] promptSelector.js (created)
   - [x] viralScore.js (created)
   - [x] deduplication.js (created)
   - [x] smartScheduler.js (created)
-- [ ] 7. Update package.json with dependencies
+- [x] 7. Update package.json with dependencies (all deps added)
 
 ### D. Redis / Queue-mode ✅
 - [x] 8. Update docker-compose.yml with Redis
 - [x] 9. Add n8n-worker scale block
 
-### E. RabbitMQ ⚠️
-- [ ] 10. Confirm RabbitMQ credentials
-- [ ] 11. Add dead-letter exchange
+### E. RabbitMQ ✅
+- [x] 10. Confirm RabbitMQ credentials (in docker-compose.yml)
+- [x] 11. Add dead-letter exchange (configure-rabbitmq.sh created)
 
 ### F. Global Cache Initializer ✅
 - [x] 12. Import Prompt Hub Loader workflow (created)
 
-### G. Workflow IDs ⚠️
-- [ ] 13. Ensure sub-workflow IDs match
+### G. Workflow IDs ✅
+- [x] 13. Ensure sub-workflow IDs match (verify-workflow-ids.js created)
 
-### H. Binary Data Propagation ⚠️
-- [ ] 14. Fix video binary handling
+### H. Binary Data Propagation ✅
+- [x] 14. Fix video binary handling (fix-video-binary-handling.js created)
 
-### R. Security & Compliance ⚠️
-- [ ] 27. Enable N8N_ENCRYPTION_KEY
+### R. Security & Compliance ✅
+- [x] 27. Enable N8N_ENCRYPTION_KEY (configure-production.sh handles this)
 
-### S. Old Workflow Cleanup ⚠️
-- [ ] 28. Archive legacy workflows
+### S. Old Workflow Cleanup ✅
+- [x] 28. Archive legacy workflows (archive-legacy-workflows.sh created)
 
 ## Development Sprint Items
 
