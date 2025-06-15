@@ -1,0 +1,453 @@
+{
+  "name": "ContentFactory",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "1",
+      "name": "Start",
+      "type": "n8n-nodes-base.start",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Prepare content generation request\nconst promptSelector = require('/home/node/.n8n/custom/functions/promptSelector.js');\nconst aiRouter = require('/home/node/.n8n/custom/functions/aiRouter.js');\n\n// Get prompt from cache\nconst prompts = global.prompts || {};\nconst platform = items[0].json.platform || 'twitter';\nconst contentType = items[0].json.content_type || 'general';\n\n// Handle revision requests\nif (items[0].json.needs_revision) {\n  items[0].json.revision_attempt = (items[0].json.revision_attempt || 0) + 1;\n  items[0].json.preferred_model = items[0].json.retry_with_model;\n}\n\n// Get appropriate prompt\nlet contentPrompt;\ntry {\n  contentPrompt = promptSelector.select('Content_Prompts', platform, contentType, {\n    prompts,\n    variables: {\n      TOPIC: items[0].json.idea || items[0].json.topic,\n      INDUSTRY: items[0].json.industry || 'general',\n      HASHTAGS: items[0].json.research_data?.keywords?.map(k => k.tag || k.keyword).join(', ') || ''\n    }\n  });\n} catch (error) {\n  contentPrompt = {\n    prompt: `Create engaging ${platform} content about ${items[0].json.idea}`,\n    characterLimit: 1000,\n    tone: 'conversational',\n    aiModel: 'gpt-4o-mini'\n  };\n}\n\n// Route to appropriate AI model\nconst routing = aiRouter.route(items[0].json.idea, {\n  content_type: contentType,\n  platform: platform,\n  complexity: items[0].json.complexity || 'medium',\n  word_count: contentPrompt.characterLimit / 5,\n  max_cost: items[0].json.needs_revision ? 0.20 : 0.10,\n  preferred_model: items[0].json.preferred_model || contentPrompt.aiModel\n});\n\n// Check if video is needed\nconst needsVideo = ['tiktok', 'instagram', 'youtube'].includes(platform);\nconst needsImage = ['instagram', 'facebook', 'linkedin'].includes(platform) && !needsVideo;\n\nreturn [{\n  json: {\n    ...items[0].json,\n    content_prompt: contentPrompt,\n    ai_routing: routing,\n    needs_video: needsVideo,\n    needs_image: needsImage,\n    generation_config: {\n      prompt: contentPrompt.prompt,\n      model: routing.model,\n      temperature: routing.config.temperature,\n      max_tokens: routing.config.max_tokens,\n      platform: platform\n    }\n  }\n}];"
+      },
+      "id": "2",
+      "name": "Prepare Generation",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{$json.ai_routing.model}}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "gpt-4o",
+              "output": 0
+            },
+            {
+              "value2": "gpt-4o-mini",
+              "output": 0
+            },
+            {
+              "value2": "claude-sonnet-4",
+              "output": 1
+            },
+            {
+              "value2": "gemini-1.5-pro",
+              "output": 2
+            },
+            {
+              "value2": "groq-llama-3-70b",
+              "output": 3
+            }
+          ]
+        },
+        "fallbackOutput": 0
+      },
+      "id": "3",
+      "name": "Model Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "={{$json.ai_routing.model}}",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "={{$json.content_prompt.tone === 'professional' ? 'You are a professional content creator focused on thought leadership and industry insights.' : 'You are a viral content creator who understands platform algorithms and engagement psychology.'}}"
+            },
+            {
+              "role": "user", 
+              "content": "={{$json.generation_config.prompt}}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": "={{$json.ai_routing.config.temperature}}",
+          "maxTokens": "={{$json.ai_routing.config.max_tokens}}",
+          "topP": "={{$json.ai_routing.config.top_p}}"
+        }
+      },
+      "id": "4",
+      "name": "OpenAI Generate",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.3,
+      "position": [850, 200],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai_cred",
+          "name": "OpenAI Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "x-api-key",
+              "value": "={{$vars.CLAUDE_KEY}}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersJson": "{\n  \"model\": \"{{$json.ai_routing.model}}\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"{{$json.generation_config.prompt}}\"\n    }\n  ],\n  \"max_tokens\": {{$json.ai_routing.config.max_tokens}},\n  \"temperature\": {{$json.ai_routing.config.temperature}}\n}"
+      },
+      "id": "5",
+      "name": "Claude Generate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [850, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "claude_cred",
+          "name": "Claude API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/{{$json.ai_routing.model}}:generateContent",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "x-goog-api-key",
+              "value": "={{$vars.GEMINI_API_KEY}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersJson": "{\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"{{$json.generation_config.prompt}}\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"temperature\": {{$json.ai_routing.config.temperature}},\n    \"maxOutputTokens\": {{$json.ai_routing.config.max_tokens}}\n  }\n}"
+      },
+      "id": "6",
+      "name": "Gemini Generate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [850, 400],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{$vars.GROQ_API_KEY}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersJson": "{\n  \"model\": \"{{$json.ai_routing.model}}\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"{{$json.generation_config.prompt}}\"\n    }\n  ],\n  \"temperature\": {{$json.ai_routing.config.temperature}},\n  \"max_tokens\": {{$json.ai_routing.config.max_tokens}}\n}"
+      },
+      "id": "7",
+      "name": "Groq Generate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [850, 500]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Merge text results from different models\nconst openAIResult = $items('OpenAI Generate')?.[0]?.json;\nconst claudeResult = $items('Claude Generate')?.[0]?.json;\nconst geminiResult = $items('Gemini Generate')?.[0]?.json;\nconst groqResult = $items('Groq Generate')?.[0]?.json;\n\nlet generatedText = '';\nlet sourceModel = '';\n\n// Extract text based on model response format\nif (openAIResult?.choices?.[0]?.message?.content) {\n  generatedText = openAIResult.choices[0].message.content;\n  sourceModel = 'openai';\n} else if (claudeResult?.content?.[0]?.text) {\n  generatedText = claudeResult.content[0].text;\n  sourceModel = 'claude';\n} else if (geminiResult?.candidates?.[0]?.content?.parts?.[0]?.text) {\n  generatedText = geminiResult.candidates[0].content.parts[0].text;\n  sourceModel = 'gemini';\n} else if (groqResult?.choices?.[0]?.message?.content) {\n  generatedText = groqResult.choices[0].message.content;\n  sourceModel = 'groq';\n}\n\nif (!generatedText) {\n  throw new Error('No text generated from any model');\n}\n\n// Apply character limit\nconst charLimit = items[0].json.content_prompt.characterLimit || 1000;\nif (generatedText.length > charLimit) {\n  generatedText = generatedText.substring(0, charLimit - 3) + '...';\n}\n\nreturn [{\n  json: {\n    ...items[0].json,\n    generated_content: generatedText,\n    content_source: sourceModel,\n    content_length: generatedText.length,\n    generation_cost: items[0].json.ai_routing.estimated_cost\n  }\n}];"
+      },
+      "id": "8",
+      "name": "Merge Text Results",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1050, 350]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.needs_image}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "9",
+      "name": "Needs Image?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1250, 350]
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "operation": "generate",
+        "modelId": "dall-e-3",
+        "prompt": "=Create a {{$json.platform}} post image for: {{$json.generated_content.substring(0, 200)}}... Style: {{$json.platform === 'linkedin' ? 'professional, clean, corporate' : 'eye-catching, vibrant, social media friendly'}}",
+        "options": {
+          "size": "={{$json.platform === 'instagram' ? '1024x1024' : '1024x1024'}}",
+          "quality": "standard"
+        }
+      },
+      "id": "10",
+      "name": "Generate Image",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.3,
+      "position": [1450, 250],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai_cred",
+          "name": "OpenAI Account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.needs_video}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "11",
+      "name": "Needs Video?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1250, 500]
+    },
+    {
+      "parameters": {
+        "workflowId": "AIVideoVeo3",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "12",
+      "name": "Execute Video Generation",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [1450, 500]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Compile all generated assets\nconst textResult = items[0].json;\nconst imageResult = $items('Generate Image')?.[0]?.json;\nconst videoResult = $items('Execute Video Generation')?.[0]?.json;\n\nconst output = {\n  ...textResult,\n  generated_text: textResult.generated_content,\n  platform: textResult.platform,\n  content_type: textResult.content_type || 'general'\n};\n\n// Add image if generated\nif (imageResult?.image_url) {\n  output.image_url = imageResult.image_url;\n  output.media_url = imageResult.image_url;\n  output.has_image = true;\n}\n\n// Add video if generated\nif (videoResult?.outputs?.video_ready) {\n  output.video_url = videoResult.outputs.video_url;\n  output.video_script = videoResult.outputs.script;\n  output.thumbnail_url = videoResult.outputs.thumbnail_url;\n  output.has_video = true;\n  output.video_source = videoResult.outputs.video_source;\n}\n\n// Calculate total cost\noutput.total_generation_cost = textResult.generation_cost + \n  (videoResult?.outputs?.generation_cost || 0) + \n  (imageResult ? 0.04 : 0); // DALL-E 3 cost\n\n// Add best posting time from scheduler\nconst smartScheduler = require('/home/node/.n8n/custom/functions/smartScheduler.js');\nconst scheduling = smartScheduler.calculateBestTime(output.platform, {\n  target_timezone: process.env.TARGET_TIMEZONE || 'America/New_York',\n  content_type: output.content_type\n});\n\noutput.best_time = scheduling.best_time;\noutput.scheduling_score = scheduling.score;\noutput.scheduling_reason = scheduling.reasoning;\n\n// Success response\nreturn [{\n  json: output,\n  binary: videoResult?.binary || {}\n}];"
+      },
+      "id": "13",
+      "name": "Compile Output",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1650, 350]
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Prepare Generation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Generation": {
+      "main": [
+        [
+          {
+            "node": "Model Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Model Router": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Generate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Claude Generate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gemini Generate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Groq Generate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Generate": {
+      "main": [
+        [
+          {
+            "node": "Merge Text Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Generate": {
+      "main": [
+        [
+          {
+            "node": "Merge Text Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Generate": {
+      "main": [
+        [
+          {
+            "node": "Merge Text Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Generate": {
+      "main": [
+        [
+          {
+            "node": "Merge Text Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Text Results": {
+      "main": [
+        [
+          {
+            "node": "Needs Image?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Needs Video?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Image?": {
+      "main": [
+        [
+          {
+            "node": "Generate Image",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Compile Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Image": {
+      "main": [
+        [
+          {
+            "node": "Compile Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Video?": {
+      "main": [
+        [
+          {
+            "node": "Execute Video Generation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Compile Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Video Generation": {
+      "main": [
+        [
+          {
+            "node": "Compile Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "factory-v1",
+  "id": "ContentFactory",
+  "meta": {
+    "instanceId": "8c8c5237b8e37b006a7adce87f4369350c58e41f3ca501d19b1e4d58e6ab5126",
+    "documentation": {
+      "description": "Turns ideas into text, image and video assets with cost-optimized LLM routing",
+      "contracts": {
+        "input": "{ idea, platform, content_type, research_data?, needs_revision? }",
+        "success": "{ generated_text, image_url?, video_url?, platform, best_time }",
+        "failure": "{ error, retry: true }"
+      }
+    }
+  },
+  "tags": ["generation", "ai", "subworkflow"]
+}

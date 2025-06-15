@@ -1,0 +1,633 @@
+{
+  "name": "ViralHub",
+  "nodes": [
+    {
+      "id": "cron",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "position": [200, 200]
+    },
+    {
+      "id": "health",
+      "name": "MCP Health Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "parameters": {
+        "url": "={{$vars.MCP_PROXY_URL}}/healthz",
+        "method": "HEAD",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{$vars.MCP_PROXY_KEY}}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "continueOnFail": true,
+      "position": [440, 200]
+    },
+    {
+      "id": "keywords",
+      "name": "Keyword Builder",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "parameters": {
+        "functionCode": "// Build keyword seeds based on industry and trends\nconst industries = [\n  { name: 'technology', keywords: ['AI', 'automation', 'cloud', 'cybersecurity'] },\n  { name: 'health', keywords: ['wellness', 'fitness', 'nutrition', 'mental health'] },\n  { name: 'business', keywords: ['startup', 'productivity', 'leadership', 'growth'] },\n  { name: 'finance', keywords: ['crypto', 'investing', 'budgeting', 'stocks'] }\n];\n\nconst selectedIndustry = $vars.TARGET_INDUSTRY || 'technology';\nconst industry = industries.find(i => i.name === selectedIndustry) || industries[0];\n\n// Generate keyword combinations\nconst seeds = [];\nconst platforms = ['tiktok', 'instagram', 'twitter', 'linkedin'];\n\nindustry.keywords.forEach(keyword => {\n  platforms.forEach(platform => {\n    seeds.push({\n      json: {\n        idea: keyword,\n        industry: industry.name,\n        platform: platform,\n        research_type: 'Trending_Topics',\n        timestamp: new Date().toISOString(),\n        source: 'keyword_builder'\n      }\n    });\n  });\n});\n\n// Add custom topics from env if available\nif ($vars.CUSTOM_TOPICS) {\n  const customTopics = $vars.CUSTOM_TOPICS.split(',');\n  customTopics.forEach(topic => {\n    platforms.forEach(platform => {\n      seeds.push({\n        json: {\n          idea: topic.trim(),\n          industry: 'custom',\n          platform: platform,\n          research_type: 'Trending_Topics',\n          timestamp: new Date().toISOString(),\n          source: 'custom_topics'\n        }\n      });\n    });\n  });\n}\n\nreturn seeds;"
+      },
+      "position": [680, 140]
+    },
+    {
+      "id": "execResearch",
+      "name": "Execute Research",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "parameters": {
+        "workflowId": "ResearchFetcher",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "position": [900, 140]
+    },
+    {
+      "id": "viralScore",
+      "name": "Viral Score Calculator",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "parameters": {
+        "functionCode": "// Calculate viral score with enhanced algorithm\nconst viralScore = require('/home/node/.n8n/custom/functions/viralScore.js');\n\nitems.forEach(item => {\n  const content = item.json.research_data?.trends?.[0]?.topic || item.json.idea;\n  const platform = item.json.platform;\n  \n  // Calculate score\n  const scoreResult = viralScore.calculateViralScore(content, {\n    engagement: item.json.research_data?.trends?.[0]?.score || 0,\n    platform: platform,\n    hashtags: item.json.research_data?.keywords || [],\n    weights: JSON.parse($vars.VIRAL_WEIGHTS_JSON || '{}')\n  });\n  \n  // Enrich item with score\n  item.json.viral_score = scoreResult.score;\n  item.json.viral_potential = scoreResult.isViral;\n  item.json.viral_recommendation = scoreResult.recommendation;\n  \n  // Add timestamp for deduplication\n  item.json.scored_at = Date.now();\n});\n\n// Filter out low-scoring items\nconst threshold = parseFloat($vars.VIRAL_THRESHOLD || '60');\nreturn items.filter(item => item.json.viral_score >= threshold);"
+      },
+      "position": [1140, 140]
+    },
+    {
+      "id": "dedupe",
+      "name": "Deduplication Filter",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "parameters": {
+        "functionCode": "// Deduplicate based on content similarity\nconst deduplication = require('/home/node/.n8n/custom/functions/deduplication.js');\n\n// Get recent posts from global cache\nconst recentPosts = global.recentPosts || [];\nconst similarityThreshold = parseFloat($vars.SIMILARITY_THRESHOLD || '0.8');\n\nconst uniqueItems = [];\nconst duplicates = [];\n\nitems.forEach(item => {\n  const content = item.json.idea || item.json.research_data?.trends?.[0]?.topic || '';\n  const isDuplicate = deduplication.checkDuplicate(content, recentPosts, similarityThreshold);\n  \n  if (!isDuplicate.isDuplicate) {\n    uniqueItems.push(item);\n    // Add to recent posts cache\n    recentPosts.push({\n      content: content,\n      hash: isDuplicate.hash,\n      platform: item.json.platform,\n      timestamp: Date.now()\n    });\n  } else {\n    duplicates.push({\n      ...item,\n      json: {\n        ...item.json,\n        duplicate_of: isDuplicate.matchedHash,\n        similarity_score: isDuplicate.similarityScore\n      }\n    });\n  }\n});\n\n// Update global cache (keep last 1000 posts)\nglobal.recentPosts = recentPosts.slice(-1000);\n\n// Log duplicates for analytics\nif (duplicates.length > 0) {\n  console.log(`Filtered ${duplicates.length} duplicate items`);\n}\n\nreturn uniqueItems;"
+      },
+      "position": [1340, 140]
+    },
+    {
+      "id": "enqueue",
+      "name": "Queue Ideas",
+      "type": "n8n-nodes-base.rabbitmq",
+      "typeVersion": 1,
+      "parameters": {
+        "mode": "send",
+        "queue": "ideas_queue",
+        "options": {
+          "durable": true,
+          "arguments": {
+            "x-message-ttl": 86400000,
+            "x-max-priority": 10
+          }
+        },
+        "sendInputData": true
+      },
+      "credentials": {
+        "rabbitmq": {
+          "id": "rabbitmq_cred",
+          "name": "RabbitMQ"
+        }
+      },
+      "position": [1540, 140]
+    },
+    {
+      "id": "dequeue",
+      "name": "Process Queue",
+      "type": "n8n-nodes-base.rabbitmqTrigger",
+      "typeVersion": 1,
+      "parameters": {
+        "queue": "ideas_queue",
+        "options": {
+          "prefetchCount": 1,
+          "jsonParseBody": true,
+          "noAck": false
+        }
+      },
+      "credentials": {
+        "rabbitmq": {
+          "id": "rabbitmq_cred",
+          "name": "RabbitMQ"
+        }
+      },
+      "position": [200, 500]
+    },
+    {
+      "id": "execContent",
+      "name": "Execute Content Factory",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "parameters": {
+        "workflowId": "ContentFactory",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "position": [440, 500]
+    },
+    {
+      "id": "execQC",
+      "name": "Execute QC Suite",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "parameters": {
+        "workflowId": "ContentQCSuite",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "position": [680, 500]
+    },
+    {
+      "id": "qcRouter",
+      "name": "QC Result Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "parameters": {
+        "dataType": "boolean",
+        "value1": "={{$json.qc_results.passed}}",
+        "rules": {
+          "rules": [
+            {
+              "value2": true,
+              "output": 0
+            },
+            {
+              "value2": false,
+              "output": 1
+            }
+          ]
+        }
+      },
+      "position": [880, 500]
+    },
+    {
+      "id": "execFormat",
+      "name": "Execute Publisher Format",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "parameters": {
+        "workflowId": "PublisherFormatter",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "position": [1080, 400]
+    },
+    {
+      "id": "smartSchedule",
+      "name": "Smart Schedule",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "parameters": {
+        "functionCode": "// Calculate optimal posting time\nconst smartScheduler = require('/home/node/.n8n/custom/functions/smartScheduler.js');\n\nconst platform = items[0].json.platform;\nconst scheduling = smartScheduler.calculateBestTime(platform, {\n  target_timezone: $vars.TARGET_TIMEZONE || 'America/New_York',\n  content_type: items[0].json.content_type || 'general',\n  user_analytics: items[0].json.analytics || null\n});\n\nitems[0].json.best_time = new Date(scheduling.best_time).getTime();\nitems[0].json.scheduling_score = scheduling.score;\nitems[0].json.scheduling_reason = scheduling.reasoning;\n\n// Calculate delay in milliseconds\nconst delayMs = Math.max(0, items[0].json.best_time - Date.now());\nitems[0].json.delay_ms = delayMs;\n\n// If delay is more than 24 hours, cap it\nif (delayMs > 86400000) {\n  items[0].json.delay_ms = 86400000;\n  items[0].json.scheduling_note = 'Capped at 24 hours';\n}\n\nreturn items;"
+      },
+      "position": [1280, 400]
+    },
+    {
+      "id": "delay",
+      "name": "Schedule Delay",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "parameters": {
+        "amount": "={{$json.delay_ms}}",
+        "unit": "milliseconds"
+      },
+      "position": [1480, 400]
+    },
+    {
+      "id": "upload",
+      "name": "Platform Upload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "parameters": {
+        "url": "={{$json.platform_endpoint}}",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParametersJson": "={{JSON.stringify($json.publish_config.headers || {})}}",
+        "sendBody": true,
+        "bodyParametersJson": "={{JSON.stringify($json.publish_payload)}}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "continueOnFail": true,
+      "position": [1680, 400]
+    },
+    {
+      "id": "uploadSuccess",
+      "name": "Upload Success?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{$node['Platform Upload'].statusCode}}",
+              "operation": "between",
+              "value2": 200,
+              "value2_2": 299
+            }
+          ]
+        }
+      },
+      "position": [1880, 400]
+    },
+    {
+      "id": "ackMessage",
+      "name": "ACK Queue Message",
+      "type": "n8n-nodes-base.rabbitmq",
+      "typeVersion": 1,
+      "parameters": {
+        "mode": "ack",
+        "queue": "ideas_queue",
+        "options": {}
+      },
+      "credentials": {
+        "rabbitmq": {
+          "id": "rabbitmq_cred",
+          "name": "RabbitMQ"
+        }
+      },
+      "position": [2080, 300]
+    },
+    {
+      "id": "requeue",
+      "name": "Requeue with Delay",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "parameters": {
+        "functionCode": "// Add retry metadata and delay\nconst retryCount = items[0].json.retry_count || 0;\nconst maxRetries = parseInt($vars.MAX_RETRIES || '3');\n\nif (retryCount >= maxRetries) {\n  // Max retries reached, send to error handler\n  items[0].json.failed = true;\n  items[0].json.failure_reason = 'Max retries exceeded';\n  items[0].json.last_error = $node['Platform Upload'].error || 'Unknown error';\n  return items;\n}\n\n// Calculate exponential backoff\nconst baseDelay = 60000; // 1 minute\nconst delay = baseDelay * Math.pow(2, retryCount);\n\nitems[0].json.retry_count = retryCount + 1;\nitems[0].json.retry_at = new Date(Date.now() + delay).toISOString();\nitems[0].json.last_attempt = new Date().toISOString();\nitems[0].json.last_error = $node['Platform Upload'].error || 'Upload failed';\n\nreturn items;"
+      },
+      "position": [2080, 500]
+    },
+    {
+      "id": "requeueMessage",
+      "name": "NACK & Requeue",
+      "type": "n8n-nodes-base.rabbitmq",
+      "typeVersion": 1,
+      "parameters": {
+        "mode": "nack",
+        "queue": "ideas_queue",
+        "options": {
+          "requeue": true
+        }
+      },
+      "credentials": {
+        "rabbitmq": {
+          "id": "rabbitmq_cred",
+          "name": "RabbitMQ"
+        }
+      },
+      "position": [2280, 500]
+    },
+    {
+      "id": "cronAnalytics",
+      "name": "Analytics Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24,
+              "triggerAtHour": 2
+            }
+          ]
+        }
+      },
+      "position": [200, 700]
+    },
+    {
+      "id": "execAnalytics",
+      "name": "Execute Analytics",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "parameters": {
+        "workflowId": "AnalyticsLoop",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "position": [400, 700]
+    },
+    {
+      "id": "errorTrigger",
+      "name": "Global Error Handler",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [200, 900]
+    },
+    {
+      "id": "errorAlert",
+      "name": "Send Error Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "parameters": {
+        "url": "={{$vars.SLACK_WEBHOOK_URL}}",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParametersJson": "{\n  \"text\": \"🚨 ViralHub Error Alert\",\n  \"blocks\": [\n    {\n      \"type\": \"section\",\n      \"text\": {\n        \"type\": \"mrkdwn\",\n        \"text\": \"*Workflow:* {{$execution.workflowName}}\\n*Node:* {{$execution.error.node}}\\n*Error:* {{$execution.error.message}}\\n*Time:* {{$execution.error.time}}\"\n      }\n    }\n  ]\n}"
+      },
+      "continueOnFail": true,
+      "position": [400, 900]
+    },
+    {
+      "id": "revisionHelper",
+      "name": "Add Revision Instructions",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "needs_revision",
+              "name": "needs_revision",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "revision_instructions",
+              "name": "revision_instructions", 
+              "value": "={{$json.qc_results.improvement_suggestions.join('; ')}}",
+              "type": "string"
+            },
+            {
+              "id": "retry_with_model",
+              "name": "retry_with_model",
+              "value": "={{$json.qc_results.retry_with_model || 'claude-sonnet-4'}}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "position": [880, 600]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "MCP Health Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP Health Check": {
+      "main": [
+        [
+          {
+            "node": "Keyword Builder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keyword Builder": {
+      "main": [
+        [
+          {
+            "node": "Execute Research",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Research": {
+      "main": [
+        [
+          {
+            "node": "Viral Score Calculator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Viral Score Calculator": {
+      "main": [
+        [
+          {
+            "node": "Deduplication Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deduplication Filter": {
+      "main": [
+        [
+          {
+            "node": "Queue Ideas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Queue": {
+      "main": [
+        [
+          {
+            "node": "Execute Content Factory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Content Factory": {
+      "main": [
+        [
+          {
+            "node": "Execute QC Suite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute QC Suite": {
+      "main": [
+        [
+          {
+            "node": "QC Result Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "QC Result Router": {
+      "main": [
+        [
+          {
+            "node": "Execute Publisher Format",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Add Revision Instructions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Publisher Format": {
+      "main": [
+        [
+          {
+            "node": "Smart Schedule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Smart Schedule": {
+      "main": [
+        [
+          {
+            "node": "Schedule Delay",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Delay": {
+      "main": [
+        [
+          {
+            "node": "Platform Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Platform Upload": {
+      "main": [
+        [
+          {
+            "node": "Upload Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Success?": {
+      "main": [
+        [
+          {
+            "node": "ACK Queue Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Requeue with Delay",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Requeue with Delay": {
+      "main": [
+        [
+          {
+            "node": "NACK & Requeue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Revision Instructions": {
+      "main": [
+        [
+          {
+            "node": "Execute Content Factory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analytics Schedule": {
+      "main": [
+        [
+          {
+            "node": "Execute Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Global Error Handler": {
+      "main": [
+        [
+          {
+            "node": "Send Error Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "concurrency": 4,
+    "saveManualExecutions": true,
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true,
+    "saveDataErrorExecution": "all",
+    "errorWorkflow": "ViralHub"
+  },
+  "versionId": "viralhub-v1",
+  "id": "ViralHub",
+  "meta": {
+    "instanceId": "8c8c5237b8e37b006a7adce87f4369350c58e41f3ca501d19b1e4d58e6ab5126"
+  },
+  "tags": ["orchestrator", "root", "production"]
+}

@@ -1,0 +1,299 @@
+{
+  "name": "AnalyticsLoop",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "1", 
+      "name": "Start",
+      "type": "n8n-nodes-base.start",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n  platform,\n  COUNT(*) as total_posts,\n  AVG(viral_score) as avg_viral_score,\n  AVG(actual_engagement_rate) as avg_engagement,\n  SUM(likes) as total_likes,\n  SUM(shares) as total_shares,\n  SUM(views) as total_views,\n  COUNT(CASE WHEN actual_engagement_rate > 0.05 THEN 1 END) as high_performers\nFROM post_metrics\nWHERE published_at >= CURRENT_DATE - INTERVAL '24 hours'\nGROUP BY platform\nORDER BY total_posts DESC;",
+        "options": {}
+      },
+      "id": "2",
+      "name": "Fetch Daily Metrics",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [450, 200],
+      "credentials": {
+        "postgres": {
+          "id": "postgres_cred",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery", 
+        "query": "SELECT \n  model_name,\n  COUNT(*) as requests,\n  AVG(latency_ms) as avg_latency,\n  SUM(cost) as total_cost,\n  AVG(quality_score) as avg_quality,\n  COUNT(CASE WHEN success = false THEN 1 END) as failures\nFROM model_performance\nWHERE created_at >= CURRENT_DATE - INTERVAL '24 hours'\nGROUP BY model_name\nORDER BY total_cost DESC;",
+        "options": {}
+      },
+      "id": "3",
+      "name": "Fetch AI Costs",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [450, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres_cred",
+          "name": "PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "propertyId": "={{$vars.GA4_PROPERTY_ID}}",
+        "resource": "report",
+        "dateRanges": [
+          {
+            "startDate": "yesterday",
+            "endDate": "today"
+          }
+        ],
+        "dimensions": [
+          {
+            "name": "eventName"
+          },
+          {
+            "name": "customEvent:platform"
+          }
+        ],
+        "metrics": [
+          {
+            "name": "eventCount"
+          },
+          {
+            "name": "totalRevenue"
+          }
+        ]
+      },
+      "id": "4",
+      "name": "GA4 Analytics",
+      "type": "n8n-nodes-base.googleAnalytics",
+      "typeVersion": 1,
+      "position": [450, 400],
+      "credentials": {
+        "googleAnalyticsOAuth2": {
+          "id": "ga4_cred",
+          "name": "Google Analytics"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "functionCode": "// Compile analytics data\nconst platformMetrics = $items('Fetch Daily Metrics');\nconst aiCosts = $items('Fetch AI Costs');\nconst ga4Data = $items('GA4 Analytics');\n\n// Calculate totals\nlet totalPosts = 0;\nlet totalEngagement = 0;\nlet totalCost = 0;\nlet totalRevenue = 0;\n\n// Process platform metrics\nconst platformSummary = {};\nplatformMetrics.forEach(row => {\n  const platform = row.json.platform;\n  platformSummary[platform] = {\n    posts: parseInt(row.json.total_posts),\n    avgViralScore: parseFloat(row.json.avg_viral_score || 0),\n    avgEngagement: parseFloat(row.json.avg_engagement || 0),\n    likes: parseInt(row.json.total_likes || 0),\n    shares: parseInt(row.json.total_shares || 0),\n    views: parseInt(row.json.total_views || 0),\n    highPerformers: parseInt(row.json.high_performers || 0)\n  };\n  totalPosts += platformSummary[platform].posts;\n  totalEngagement += platformSummary[platform].avgEngagement * platformSummary[platform].posts;\n});\n\n// Process AI costs\nconst modelCosts = {};\naiCosts.forEach(row => {\n  const model = row.json.model_name;\n  modelCosts[model] = {\n    requests: parseInt(row.json.requests),\n    avgLatency: parseFloat(row.json.avg_latency || 0),\n    totalCost: parseFloat(row.json.total_cost || 0),\n    avgQuality: parseFloat(row.json.avg_quality || 0),\n    failures: parseInt(row.json.failures || 0)\n  };\n  totalCost += modelCosts[model].totalCost;\n});\n\n// Process GA4 data if available\nif (ga4Data && ga4Data.length > 0) {\n  ga4Data.forEach(row => {\n    totalRevenue += parseFloat(row.json.totalRevenue || 0);\n  });\n}\n\n// Calculate ROI\nconst roi = totalCost > 0 ? ((totalRevenue - totalCost) / totalCost * 100).toFixed(2) : 0;\nconst avgEngagementRate = totalPosts > 0 ? (totalEngagement / totalPosts).toFixed(4) : 0;\n\n// Get top performing content\nconst topPerformers = [];\nObject.entries(platformSummary).forEach(([platform, metrics]) => {\n  if (metrics.highPerformers > 0) {\n    topPerformers.push({\n      platform,\n      count: metrics.highPerformers,\n      avgEngagement: metrics.avgEngagement\n    });\n  }\n});\ntopPerformers.sort((a, b) => b.avgEngagement - a.avgEngagement);\n\nreturn [{\n  json: {\n    date: new Date().toISOString(),\n    summary: {\n      totalPosts,\n      avgEngagementRate,\n      totalCost: totalCost.toFixed(2),\n      totalRevenue: totalRevenue.toFixed(2),\n      roi: `${roi}%`,\n      topPlatform: topPerformers[0]?.platform || 'none'\n    },\n    platformMetrics: platformSummary,\n    modelCosts,\n    topPerformers,\n    recommendations: this.generateRecommendations(platformSummary, modelCosts)\n  }\n}];\n\nfunction generateRecommendations(platforms, models) {\n  const recommendations = [];\n  \n  // Platform recommendations\n  Object.entries(platforms).forEach(([platform, metrics]) => {\n    if (metrics.avgEngagement < 0.02) {\n      recommendations.push(`${platform}: Engagement below 2% - consider refreshing content strategy`);\n    }\n    if (metrics.avgViralScore < 50) {\n      recommendations.push(`${platform}: Low viral scores - review trending topics`);\n    }\n  });\n  \n  // Model recommendations\n  Object.entries(models).forEach(([model, metrics]) => {\n    if (metrics.failures > metrics.requests * 0.1) {\n      recommendations.push(`${model}: High failure rate (${((metrics.failures/metrics.requests)*100).toFixed(1)}%) - check API limits`);\n    }\n    if (metrics.avgLatency > 5000) {\n      recommendations.push(`${model}: Slow response times - consider alternatives`);\n    }\n  });\n  \n  return recommendations;\n}"
+      },
+      "id": "5",
+      "name": "Compile Analytics",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "resource": "sheet",
+        "operation": "append",
+        "sheetId": "={{$vars.SHEETS_ID}}",
+        "range": "Analytics!A:K",
+        "options": {
+          "valueInputMode": "USER_ENTERED"
+        },
+        "dataMode": "autoMapInputData"
+      },
+      "id": "6",
+      "name": "Update Analytics Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.2,
+      "position": [850, 200],
+      "credentials": {
+        "googleSheetsOAuth2": {
+          "id": "gsheets_cred",
+          "name": "Google Sheets Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Generate HTML digest email\nconst analytics = items[0].json;\n\nconst htmlContent = `\n<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; color: #333; }\n    .header { background: #4A90E2; color: white; padding: 20px; text-align: center; }\n    .metric-card { background: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 8px; }\n    .metric-value { font-size: 24px; font-weight: bold; color: #4A90E2; }\n    .metric-label { color: #666; font-size: 14px; }\n    .platform-table { width: 100%; border-collapse: collapse; margin: 20px 0; }\n    .platform-table th { background: #4A90E2; color: white; padding: 10px; text-align: left; }\n    .platform-table td { padding: 10px; border-bottom: 1px solid #ddd; }\n    .recommendation { background: #FFF3CD; padding: 10px; margin: 5px 0; border-radius: 5px; }\n    .footer { text-align: center; color: #666; margin-top: 30px; font-size: 12px; }\n  </style>\n</head>\n<body>\n  <div class=\"header\">\n    <h1>📊 Daily Social Media Analytics</h1>\n    <p>${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>\n  </div>\n  \n  <div style=\"padding: 20px;\">\n    <h2>📈 Key Metrics</h2>\n    <div style=\"display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;\">\n      <div class=\"metric-card\">\n        <div class=\"metric-value\">${analytics.summary.totalPosts}</div>\n        <div class=\"metric-label\">Total Posts</div>\n      </div>\n      <div class=\"metric-card\">\n        <div class=\"metric-value\">${(analytics.summary.avgEngagementRate * 100).toFixed(2)}%</div>\n        <div class=\"metric-label\">Avg Engagement Rate</div>\n      </div>\n      <div class=\"metric-card\">\n        <div class=\"metric-value\">${analytics.summary.roi}</div>\n        <div class=\"metric-label\">ROI</div>\n      </div>\n    </div>\n    \n    <h2>💰 Financial Summary</h2>\n    <div style=\"display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;\">\n      <div class=\"metric-card\">\n        <div class=\"metric-value\">$${analytics.summary.totalCost}</div>\n        <div class=\"metric-label\">Total AI Costs</div>\n      </div>\n      <div class=\"metric-card\">\n        <div class=\"metric-value\">$${analytics.summary.totalRevenue}</div>\n        <div class=\"metric-label\">Revenue Generated</div>\n      </div>\n    </div>\n    \n    <h2>📱 Platform Performance</h2>\n    <table class=\"platform-table\">\n      <thead>\n        <tr>\n          <th>Platform</th>\n          <th>Posts</th>\n          <th>Avg Engagement</th>\n          <th>Total Views</th>\n          <th>High Performers</th>\n        </tr>\n      </thead>\n      <tbody>\n        ${Object.entries(analytics.platformMetrics).map(([platform, metrics]) => `\n          <tr>\n            <td><strong>${platform}</strong></td>\n            <td>${metrics.posts}</td>\n            <td>${(metrics.avgEngagement * 100).toFixed(2)}%</td>\n            <td>${metrics.views.toLocaleString()}</td>\n            <td>${metrics.highPerformers}</td>\n          </tr>\n        `).join('')}\n      </tbody>\n    </table>\n    \n    <h2>🤖 AI Model Usage</h2>\n    <table class=\"platform-table\">\n      <thead>\n        <tr>\n          <th>Model</th>\n          <th>Requests</th>\n          <th>Cost</th>\n          <th>Avg Quality</th>\n          <th>Failures</th>\n        </tr>\n      </thead>\n      <tbody>\n        ${Object.entries(analytics.modelCosts).map(([model, metrics]) => `\n          <tr>\n            <td><strong>${model}</strong></td>\n            <td>${metrics.requests}</td>\n            <td>$${metrics.totalCost.toFixed(2)}</td>\n            <td>${(metrics.avgQuality * 100).toFixed(1)}%</td>\n            <td>${metrics.failures}</td>\n          </tr>\n        `).join('')}\n      </tbody>\n    </table>\n    \n    ${analytics.recommendations.length > 0 ? `\n      <h2>💡 Recommendations</h2>\n      ${analytics.recommendations.map(rec => `\n        <div class=\"recommendation\">⚠️ ${rec}</div>\n      `).join('')}\n    ` : ''}\n    \n    <div class=\"footer\">\n      <p>Generated by ViralHub Analytics | <a href=\"${process.env.N8N_HOST || 'http://localhost:5678'}\">View Dashboard</a></p>\n    </div>\n  </div>\n</body>\n</html>\n`;\n\nreturn [{\n  json: {\n    ...analytics,\n    emailContent: htmlContent,\n    recipients: (process.env.DIGEST_RECIPIENTS || '').split(',').map(r => r.trim())\n  }\n}];"
+      },
+      "id": "7",
+      "name": "Generate Digest",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{$json.recipients.join(',')}}",
+        "subject": "=📊 Daily Social Media Performance - {{$today.format('MMM DD, YYYY')}}",
+        "emailType": "html",
+        "message": "={{$json.emailContent}}",
+        "options": {}
+      },
+      "id": "8",
+      "name": "Send Email Digest",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1050, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail_cred",
+          "name": "Gmail Account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{$vars.SLACK_WEBHOOK_URL}}",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParametersJson": "{\n  \"text\": \"📊 Daily Analytics Summary\",\n  \"blocks\": [\n    {\n      \"type\": \"header\",\n      \"text\": {\n        \"type\": \"plain_text\",\n        \"text\": \"📊 Social Media Performance\"\n      }\n    },\n    {\n      \"type\": \"section\",\n      \"fields\": [\n        {\n          \"type\": \"mrkdwn\",\n          \"text\": \"*Total Posts:* {{$json.summary.totalPosts}}\"\n        },\n        {\n          \"type\": \"mrkdwn\",\n          \"text\": \"*Avg Engagement:* {{$json.summary.avgEngagementRate}}%\"\n        },\n        {\n          \"type\": \"mrkdwn\",\n          \"text\": \"*Total Cost:* ${{$json.summary.totalCost}}\"\n        },\n        {\n          \"type\": \"mrkdwn\",\n          \"text\": \"*ROI:* {{$json.summary.roi}}\"\n        }\n      ]\n    },\n    {\n      \"type\": \"section\",\n      \"text\": {\n        \"type\": \"mrkdwn\",\n        \"text\": \"*Top Platform:* {{$json.summary.topPlatform}}\\n*Top Performers:* {{$json.topPerformers.length}} high-engagement posts\"\n      }\n    }\n  ]\n}"
+      },
+      "id": "9",
+      "name": "Slack Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1050, 400],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Update materialized view\nREFRESH MATERIALIZED VIEW CONCURRENTLY daily_platform_analytics;\n\n-- Store daily snapshot\nINSERT INTO analytics_snapshots (date, metrics, created_at)\nVALUES ($1, $2, NOW())\nON CONFLICT (date) DO UPDATE\nSET metrics = $2, updated_at = NOW();",
+        "options": {
+          "queryParams": "={{[\n  $json.date.split('T')[0],\n  JSON.stringify($json)\n]}}"
+        }
+      },
+      "id": "10",
+      "name": "Store Analytics",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [850, 500],
+      "credentials": {
+        "postgres": {
+          "id": "postgres_cred",
+          "name": "PostgreSQL"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Fetch Daily Metrics",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch AI Costs",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "GA4 Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Daily Metrics": {
+      "main": [
+        [
+          {
+            "node": "Compile Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch AI Costs": {
+      "main": [
+        [
+          {
+            "node": "Compile Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GA4 Analytics": {
+      "main": [
+        [
+          {
+            "node": "Compile Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compile Analytics": {
+      "main": [
+        [
+          {
+            "node": "Update Analytics Sheet",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Generate Digest",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Store Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Digest": {
+      "main": [
+        [
+          {
+            "node": "Send Email Digest",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Slack Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "analytics-v1",
+  "id": "AnalyticsLoop",
+  "meta": {
+    "instanceId": "8c8c5237b8e37b006a7adce87f4369350c58e41f3ca501d19b1e4d58e6ab5126",
+    "documentation": {
+      "description": "Daily analytics collection, ROI calculation, and reporting",
+      "contracts": {
+        "input": "Triggered by schedule or manual execution",
+        "output": "Analytics stored in DB, Sheet updated, emails sent"
+      }
+    }
+  },
+  "tags": ["analytics", "reporting", "subworkflow"]
+}
