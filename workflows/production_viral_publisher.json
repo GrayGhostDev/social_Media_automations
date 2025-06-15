@@ -1,0 +1,1035 @@
+{
+  "name": "Production Viral Publisher - Full Stack",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "node-1",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [100, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.MCP_PROXY_URL}}/healthz",
+        "method": "HEAD",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.MCP_PROXY_KEY}}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "node-38",
+      "name": "MCP Health Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [300, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{$node[\"MCP Health Check\"].json[\"statusCode\"]}}",
+              "operation": "equal",
+              "value2": 200
+            }
+          ]
+        }
+      },
+      "id": "health-if",
+      "name": "IF MCP Healthy",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Generate trending search terms based on time and context\nconst terms = [];\nconst now = new Date();\nconst hour = now.getHours();\nconst day = now.getDay();\n\n// Time-based topics\nif (hour >= 6 && hour < 10) {\n  terms.push('morning routine', 'productivity tips', 'breakfast ideas');\n} else if (hour >= 10 && hour < 14) {\n  terms.push('work hacks', 'lunch ideas', 'midday motivation');\n} else if (hour >= 14 && hour < 18) {\n  terms.push('afternoon energy', 'quick tips', 'life hacks');\n} else if (hour >= 18 && hour < 22) {\n  terms.push('evening routine', 'dinner recipes', 'relaxation');\n} else {\n  terms.push('night owl', 'late night thoughts', 'insomnia tips');\n}\n\n// Day-based topics\nif (day === 1) terms.push('monday motivation', 'week planning');\nif (day === 5) terms.push('friday feeling', 'weekend plans');\nif (day === 0 || day === 6) terms.push('weekend vibes', 'self care');\n\n// Seasonal/trending\nterms.push('AI tools', 'sustainability', 'mental health');\n\nreturn terms.slice(0, 5).map(term => ({ json: { term, timestamp: now.toISOString() } }));"
+      },
+      "id": "keyword-gen",
+      "name": "Keyword Generator",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [700, 200]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.MCP_PROXY_URL}}/macrocosmos/query",
+        "method": "GET",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.MCP_PROXY_KEY}}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParametersUi": {
+          "parameter": [
+            {
+              "name": "q",
+              "value": "={{$json.term}}"
+            },
+            {
+              "name": "sources",
+              "value": "twitter,reddit,huggingface"
+            }
+          ]
+        }
+      },
+      "id": "node-2",
+      "name": "Macrocosmos Discovery",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [900, 100]
+    },
+    {
+      "parameters": {
+        "url": "=https://serpapi.com/search.json",
+        "method": "GET",
+        "authentication": "none",
+        "sendQuery": true,
+        "queryParametersUi": {
+          "parameter": [
+            {
+              "name": "engine",
+              "value": "google_trends"
+            },
+            {
+              "name": "q",
+              "value": "={{$json.term}}"
+            },
+            {
+              "name": "geo",
+              "value": "={{$env.TRENDS_GEO}}"
+            },
+            {
+              "name": "api_key",
+              "value": "={{$env.SERPAPI_KEY}}"
+            }
+          ]
+        }
+      },
+      "id": "node-3",
+      "name": "Google Trends Puller",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [900, 200],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "=https://ritetag.com/api/v2.0/ai/twitter/{{encodeURIComponent($json.term)}}",
+        "method": "GET",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.RITETAG_KEY}}"
+            }
+          ]
+        }
+      },
+      "id": "node-4",
+      "name": "RiteTag Analyzer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [900, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "=https://api.buzzsumo.com/search/articles.json",
+        "method": "GET",
+        "authentication": "none",
+        "sendQuery": true,
+        "queryParametersUi": {
+          "parameter": [
+            {
+              "name": "q",
+              "value": "={{$json.term}}"
+            },
+            {
+              "name": "api_key",
+              "value": "={{$env.BUZZSUMO_KEY}}"
+            },
+            {
+              "name": "result_type",
+              "value": "trending"
+            }
+          ]
+        }
+      },
+      "id": "node-5",
+      "name": "BuzzSumo Competitor",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [900, 400],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "read",
+        "sheetId": "={{$env.GOOGLE_SHEET_ID}}",
+        "range": "Ideas!A2:E",
+        "filters": {
+          "conditions": [
+            {
+              "column": "Status",
+              "value": "ready"
+            }
+          ]
+        }
+      },
+      "id": "node-6",
+      "name": "Sheets Idea Import",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.2,
+      "position": [900, 500]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "multiplex",
+        "options": {}
+      },
+      "id": "node-7",
+      "name": "Merge Discovery Data",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [1100, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Viral Score Calculator with weighted factors\nconst weights = JSON.parse($env.VIRAL_WEIGHTS_JSON || '{\"engagement\":0.3,\"recency\":0.2,\"relevance\":0.25,\"authority\":0.25}');\n\nfunction calculateScore(item) {\n  let score = 0;\n  \n  // Engagement score (likes, shares, comments)\n  const engagement = item.likes || item.retweets || item.score || 0;\n  score += Math.min(engagement / 1000, 1) * weights.engagement * 100;\n  \n  // Recency score\n  const ageHours = item.timestamp ? \n    (new Date() - new Date(item.timestamp)) / (1000 * 60 * 60) : 24;\n  const recencyScore = Math.max(1 - (ageHours / 168), 0); // 1 week decay\n  score += recencyScore * weights.recency * 100;\n  \n  // Relevance score (keyword matching)\n  const term = item.term || '';\n  const content = (item.content || item.title || '').toLowerCase();\n  const relevance = content.includes(term.toLowerCase()) ? 1 : 0.5;\n  score += relevance * weights.relevance * 100;\n  \n  // Authority score (source credibility)\n  const authorityMap = {\n    'macrocosmos': 0.9,\n    'buzzsumo': 0.85,\n    'google_trends': 0.8,\n    'ritetag': 0.75,\n    'sheets': 0.7,\n    'default': 0.5\n  };\n  const authority = authorityMap[item.source] || authorityMap.default;\n  score += authority * weights.authority * 100;\n  \n  return Math.round(Math.min(score, 100));\n}\n\n// Process all items\nreturn $input.all().map(item => {\n  const viralScore = calculateScore(item.json);\n  return {\n    json: {\n      ...item.json,\n      viral_score: viralScore,\n      viral_tier: viralScore >= 80 ? 'hot' : viralScore >= 60 ? 'warm' : 'cold'\n    }\n  };\n});"
+      },
+      "id": "node-8",
+      "name": "Viral Score Calculator",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1300, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Deduplication based on content similarity\nconst threshold = parseFloat($env.SIMILARITY_THRESHOLD || '0.8');\nconst seen = new Map();\n\nfunction similarity(str1, str2) {\n  const s1 = str1.toLowerCase();\n  const s2 = str2.toLowerCase();\n  \n  // Simple Jaccard similarity\n  const words1 = new Set(s1.split(/\\s+/));\n  const words2 = new Set(s2.split(/\\s+/));\n  \n  const intersection = new Set([...words1].filter(x => words2.has(x)));\n  const union = new Set([...words1, ...words2]);\n  \n  return intersection.size / union.size;\n}\n\nconst unique = [];\n\nfor (const item of $input.all()) {\n  const content = item.json.content || item.json.title || '';\n  let isDuplicate = false;\n  \n  for (const [key, existing] of seen) {\n    if (similarity(content, existing) >= threshold) {\n      isDuplicate = true;\n      break;\n    }\n  }\n  \n  if (!isDuplicate) {\n    seen.set(content, content);\n    unique.push(item);\n  }\n}\n\nreturn unique;"
+      },
+      "id": "node-9",
+      "name": "Deduplication Filter",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1500, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.content || $json.title}}",
+              "operation": "notContains",
+              "value2": "={{$env.BLOCKED_KEYWORDS}}"
+            }
+          ]
+        }
+      },
+      "id": "node-10",
+      "name": "Content Filter",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1700, 300]
+    },
+    {
+      "parameters": {
+        "queue": "ideas_queue",
+        "options": {
+          "durable": true,
+          "arguments": {
+            "x-message-ttl": 86400000
+          }
+        }
+      },
+      "id": "node-11",
+      "name": "RabbitMQ Enqueue",
+      "type": "n8n-nodes-base.rabbitmq",
+      "typeVersion": 1,
+      "position": [1900, 200]
+    },
+    {
+      "parameters": {
+        "queue": "ideas_queue",
+        "options": {
+          "jsonParseBody": true,
+          "prefetchCount": 1
+        }
+      },
+      "id": "node-12",
+      "name": "RabbitMQ Dequeue",
+      "type": "n8n-nodes-base.rabbitmqTrigger",
+      "typeVersion": 1,
+      "position": [100, 800]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "options": {
+          "temperature": 0.7,
+          "systemMessage": "You are an AI agent that selects the best model for content generation based on the task."
+        }
+      },
+      "id": "node-13",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1,
+      "position": [300, 800]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "platform_prompts",
+              "name": "platform_prompts",
+              "value": "={{ {\n  \"tiktok\": {\n    \"system\": \"You create viral TikTok content. Use Gen Z language, emojis, and trending sounds references. Max 150 chars.\",\n    \"constraints\": \"Include 3-5 hashtags, reference a trending sound, add a hook in first 3 words\"\n  },\n  \"instagram\": {\n    \"system\": \"You create engaging Instagram Reels content. Be visually descriptive, use emojis strategically.\",\n    \"constraints\": \"Max 2200 chars, 5-10 hashtags, strong CTA, mention visual elements\"\n  },\n  \"linkedin\": {\n    \"system\": \"You create professional LinkedIn content. Be insightful, data-driven, and thought-provoking.\",\n    \"constraints\": \"Max 3000 chars, professional tone, include statistics, end with a question\"\n  },\n  \"twitter\": {\n    \"system\": \"You create viral tweets. Be concise, witty, and shareable.\",\n    \"constraints\": \"Max 280 chars, 1-3 hashtags, include a hook or question\"\n  },\n  \"facebook\": {\n    \"system\": \"You create engaging Facebook posts. Be conversational and community-focused.\",\n    \"constraints\": \"Encourage comments, use emotional hooks, include relevant links\"\n  },\n  \"youtube\": {\n    \"system\": \"You create compelling YouTube Shorts descriptions. Focus on SEO and engagement.\",\n    \"constraints\": \"Include timestamps, 3-5 tags, compelling title under 100 chars\"\n  }\n} }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-14",
+      "name": "Prompt Engineer",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [500, 800]
+    },
+    {
+      "parameters": {
+        "resource": "text",
+        "operation": "message",
+        "modelId": "={{ $node['AI Agent'].json.selected_model || 'gpt-4' }}",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "={{ $json.platform_prompts[$json.target_platform].system }}"
+            },
+            {
+              "role": "user", 
+              "content": "=Create content about: {{$json.content}}\n\nConstraints: {{$json.platform_prompts[$json.target_platform].constraints}}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.8,
+          "maxTokens": 500
+        }
+      },
+      "id": "node-15",
+      "name": "Generate Text",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.3,
+      "position": [700, 800]
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "operation": "generate",
+        "modelId": "dall-e-3",
+        "prompt": "={{ $json.generated_text }}",
+        "options": {
+          "size": "1024x1024",
+          "quality": "standard",
+          "n": 1
+        }
+      },
+      "id": "node-16",
+      "name": "Generate Image",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.3,
+      "position": [700, 900]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.RUNWAY_URL}}/v1/image2video",
+        "method": "POST",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.RUNWAY_API_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "image_url",
+              "value": "={{$json.image_url}}"
+            },
+            {
+              "name": "duration",
+              "value": "5"
+            },
+            {
+              "name": "motion_intensity",
+              "value": "medium"
+            }
+          ]
+        }
+      },
+      "id": "node-17",
+      "name": "Generate Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [700, 1000],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "resource": "moderation",
+        "input": "={{ $json.generated_text }}",
+        "options": {}
+      },
+      "id": "node-18",
+      "name": "Moderation Check",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.3,
+      "position": [900, 800]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.flagged}}",
+              "value2": false
+            }
+          ]
+        }
+      },
+      "id": "moderation-if",
+      "name": "IF Content Safe",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1100, 800]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "x-api-key",
+              "value": "={{$env.ANTHROPIC_API_KEY}}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "model",
+              "value": "claude-3-haiku-20240307"
+            },
+            {
+              "name": "messages",
+              "value": "={{ [{\"role\": \"user\", \"content\": \"Rewrite this content to be completely safe and appropriate while maintaining engagement: \" + $json.generated_text}] }}"
+            },
+            {
+              "name": "max_tokens",
+              "value": "500"
+            }
+          ]
+        }
+      },
+      "id": "node-19",
+      "name": "Fallback Claude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1300, 900]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.target_platform }}",
+                    "rightValue": "tiktok",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "tiktok"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.target_platform }}",
+                    "rightValue": "instagram",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "instagram"
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.target_platform }}",
+                    "rightValue": "linkedin",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "linkedin"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "other"
+        }
+      },
+      "id": "node-20",
+      "name": "Platform Formatter",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1500, 800]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "node-21",
+      "name": "Publishing Scheduler",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [100, 1400]
+    },
+    {
+      "parameters": {
+        "operation": "post",
+        "sessionId": "={{$env.TIKTOK_SESSION}}",
+        "text": "={{$json.formatted_content}}",
+        "videoPath": "={{$json.video_url}}"
+      },
+      "id": "node-22",
+      "name": "TikTok Publisher",
+      "type": "n8n-nodes-community.tiktok",
+      "typeVersion": 1,
+      "position": [1700, 700]
+    },
+    {
+      "parameters": {
+        "url": "=https://graph.facebook.com/v18.0/{{$env.INSTAGRAM_ACCOUNT_ID}}/media",
+        "method": "POST",
+        "authentication": "none",
+        "sendQuery": true,
+        "queryParametersUi": {
+          "parameter": [
+            {
+              "name": "access_token",
+              "value": "={{$env.INSTAGRAM_ACCESS_TOKEN}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "media_type",
+              "value": "REELS"
+            },
+            {
+              "name": "video_url",
+              "value": "={{$json.video_url}}"
+            },
+            {
+              "name": "caption",
+              "value": "={{$json.formatted_content}}"
+            }
+          ]
+        }
+      },
+      "id": "node-23",
+      "name": "Instagram Reels Publisher",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1700, 800]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.MCP_PROXY_URL}}/facebook/post_to_facebook",
+        "method": "POST",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.MCP_PROXY_KEY}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "message",
+              "value": "={{$json.formatted_content}}"
+            },
+            {
+              "name": "link",
+              "value": "={{$json.source_url}}"
+            }
+          ]
+        }
+      },
+      "id": "node-24",
+      "name": "Facebook MCP Publisher",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1700, 900]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.linkedin.com/v2/ugcPosts",
+        "method": "POST",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.LINKEDIN_ACCESS_TOKEN}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"author\": `urn:li:person:${$env.LINKEDIN_PERSON_ID}`,\n  \"lifecycleState\": \"PUBLISHED\",\n  \"specificContent\": {\n    \"com.linkedin.ugc.ShareContent\": {\n      \"shareCommentary\": {\n        \"text\": $json.formatted_content\n      },\n      \"shareMediaCategory\": \"NONE\"\n    }\n  },\n  \"visibility\": {\n    \"com.linkedin.ugc.MemberNetworkVisibility\": \"PUBLIC\"\n  }\n} }}"
+      },
+      "id": "node-25",
+      "name": "LinkedIn Publisher",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1700, 1000]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "video",
+        "operation": "upload",
+        "title": "={{$json.title}}",
+        "description": "={{$json.formatted_content}}",
+        "categoryId": "22",
+        "privacyStatus": "public",
+        "shorts": true,
+        "options": {
+          "notifySubscribers": true
+        }
+      },
+      "id": "node-26",
+      "name": "YouTube Shorts Publisher",
+      "type": "n8n-nodes-base.youtube",
+      "typeVersion": 1,
+      "position": [1700, 1100]
+    },
+    {
+      "parameters": {
+        "resource": "post",
+        "operation": "create",
+        "title": "={{$json.title}}",
+        "content": "={{$json.long_form_content}}",
+        "status": "publish",
+        "categories": ["{{$json.category_id}}"],
+        "tags": "={{$json.tags}}",
+        "featuredMedia": "={{$json.image_id}}"
+      },
+      "id": "node-27",
+      "name": "WordPress Publisher",
+      "type": "n8n-nodes-base.wordpress",
+      "typeVersion": 1,
+      "position": [1700, 1200]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "node-28",
+      "name": "Publishing Results Collector",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [1900, 950]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": "public",
+        "table": "post_metrics",
+        "columns": "platform,post_id,content_hash,viral_score,published_at,status",
+        "additionalFields": {}
+      },
+      "id": "node-29",
+      "name": "Analytics Writer",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [2100, 950]
+    },
+    {
+      "parameters": {
+        "url": "=https://analyticsdata.googleapis.com/v1beta/properties/{{$env.GA4_PROPERTY_ID}}:runReport",
+        "method": "POST",
+        "authentication": "oAuth2",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"dateRanges\": [{\n    \"startDate\": \"yesterday\",\n    \"endDate\": \"today\"\n  }],\n  \"dimensions\": [{\n    \"name\": \"pagePath\"\n  }],\n  \"metrics\": [{\n    \"name\": \"screenPageViews\"\n  }, {\n    \"name\": \"totalUsers\"\n  }]\n} }}"
+      },
+      "id": "node-30",
+      "name": "GA4 Collector",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [300, 1600]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Fetch insights from multiple platforms\nconst platforms = ['facebook', 'instagram', 'tiktok', 'linkedin'];\nconst insights = [];\n\nfor (const platform of platforms) {\n  insights.push({\n    json: {\n      platform,\n      fetch_endpoint: `${platform}_insights`,\n      timestamp: new Date().toISOString()\n    }\n  });\n}\n\nreturn insights;"
+      },
+      "id": "node-31",
+      "name": "Platform Insights Fetcher",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [500, 1600]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "node-32",
+      "name": "A/B Splitter",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1300, 700]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Compare A/B test variants after 24 hours\nconst variantA = $json.variant_a_metrics;\nconst variantB = $json.variant_b_metrics;\n\nconst winner = variantA.ctr > variantB.ctr ? 'A' : 'B';\nconst uplift = Math.abs(variantA.ctr - variantB.ctr) / Math.min(variantA.ctr, variantB.ctr) * 100;\n\nreturn [{\n  json: {\n    winner,\n    uplift_percentage: uplift,\n    variant_a_ctr: variantA.ctr,\n    variant_b_ctr: variantB.ctr,\n    recommendation: `Use variant ${winner} for future posts`\n  }\n}];"
+      },
+      "id": "node-33",
+      "name": "Variant Comparator",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [700, 1600]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Virality Predictor using simple heuristics\n// In production, this would load a TensorFlow.js model\n\nconst features = {\n  hour_of_day: new Date().getHours(),\n  day_of_week: new Date().getDay(),\n  content_length: ($json.content || '').length,\n  hashtag_count: ($json.content.match(/#/g) || []).length,\n  emoji_count: ($json.content.match(/[\\u{1F600}-\\u{1F64F}]/gu) || []).length,\n  question_mark: $json.content.includes('?') ? 1 : 0,\n  exclamation: $json.content.includes('!') ? 1 : 0,\n  viral_score: $json.viral_score || 0\n};\n\n// Simple prediction model (replace with actual TF.js model)\nlet predicted_virality = 0;\npredicted_virality += features.viral_score * 0.3;\npredicted_virality += (features.emoji_count > 0 ? 10 : 0);\npredicted_virality += (features.question_mark ? 15 : 0);\npredicted_virality += (features.hashtag_count >= 3 && features.hashtag_count <= 5 ? 10 : 0);\npredicted_virality += (features.hour_of_day >= 12 && features.hour_of_day <= 14 ? 5 : 0);\npredicted_virality += (features.hour_of_day >= 19 && features.hour_of_day <= 21 ? 10 : 0);\n\nreturn [{\n  json: {\n    predicted_virality: Math.min(predicted_virality, 100),\n    confidence: 0.75,\n    features,\n    recommendation: predicted_virality >= 70 ? 'high_potential' : 'normal'\n  }\n}];"
+      },
+      "id": "node-34",
+      "name": "Virality Predictor",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [900, 1600]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Optimize prompts based on performance data\nconst performance = $json.platform_performance || {};\nconst current_weights = JSON.parse($env.VIRAL_WEIGHTS_JSON || '{}');\n\n// Adjust weights based on performance\nconst new_weights = { ...current_weights };\n\nif (performance.engagement_rate > 0.05) {\n  new_weights.engagement *= 1.1;\n}\nif (performance.click_rate > 0.02) {\n  new_weights.relevance *= 1.1;\n}\n\n// Normalize weights\nconst sum = Object.values(new_weights).reduce((a, b) => a + b, 0);\nObject.keys(new_weights).forEach(key => {\n  new_weights[key] = new_weights[key] / sum;\n});\n\nreturn [{\n  json: {\n    updated_weights: new_weights,\n    performance_summary: performance,\n    optimization_applied: true\n  }\n}];"
+      },
+      "id": "node-35",
+      "name": "Prompt Optimizer",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1100, 1600]
+    },
+    {
+      "parameters": {
+        "html": "=<h2>Daily Performance Digest</h2>\n<p>Date: {{$now.format('YYYY-MM-DD')}}</p>\n\n<h3>Publishing Summary</h3>\n<table border=\"1\" style=\"border-collapse: collapse; width: 100%;\">\n  <tr>\n    <th>Platform</th>\n    <th>Posts</th>\n    <th>Avg Engagement</th>\n    <th>Best Performing</th>\n  </tr>\n  {{#each $json.platform_stats}}\n  <tr>\n    <td>{{platform}}</td>\n    <td>{{post_count}}</td>\n    <td>{{engagement_rate}}%</td>\n    <td>{{best_post_id}}</td>\n  </tr>\n  {{/each}}\n</table>\n\n<h3>A/B Test Results</h3>\n<p>Winner: Variant {{$json.ab_test_winner}}</p>\n<p>Uplift: {{$json.ab_uplift}}%</p>\n\n<h3>AI Model Performance</h3>\n<ul>\n  <li>GPT-4: {{$json.model_stats.gpt4_usage}} uses</li>\n  <li>Claude: {{$json.model_stats.claude_usage}} uses</li>\n  <li>Gemini: {{$json.model_stats.gemini_usage}} uses</li>\n</ul>\n\n<h3>Recommendations</h3>\n<ul>\n  {{#each $json.recommendations}}\n  <li>{{this}}</li>\n  {{/each}}\n</ul>"
+      },
+      "id": "node-36",
+      "name": "Daily Digest Generator",
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.1,
+      "position": [1300, 1600]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{$env.DIGEST_RECIPIENTS}}",
+        "subject": "=Daily Social Media Performance - {{$now.format('YYYY-MM-DD')}}",
+        "emailType": "html",
+        "message": "={{$json.html}}"
+      },
+      "id": "node-37",
+      "name": "Digest Sender",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1500, 1600]
+    },
+    {
+      "parameters": {},
+      "id": "node-39",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [100, 1800]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.SLACK_WEBHOOK_URL}}",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "text",
+              "value": "=🚨 Workflow Error: {{$json.error.message}}\nNode: {{$json.error.node}}\nTime: {{$now.toISO()}}"
+            }
+          ]
+        }
+      },
+      "id": "node-40",
+      "name": "Slack Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [300, 1800]
+    },
+    {
+      "parameters": {
+        "resource": "incident",
+        "operation": "create",
+        "summary": "=Social Media Workflow Error - {{$json.error.node}}",
+        "details": "={{$json.error}}",
+        "urgency": "high"
+      },
+      "id": "node-41",
+      "name": "PagerDuty Alert",
+      "type": "n8n-nodes-base.pagerDuty",
+      "typeVersion": 1,
+      "position": [500, 1800]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[{ "node": "MCP Health Check", "type": "main", "index": 0 }]]
+    },
+    "MCP Health Check": {
+      "main": [[{ "node": "IF MCP Healthy", "type": "main", "index": 0 }]]
+    },
+    "IF MCP Healthy": {
+      "main": [
+        [{ "node": "Keyword Generator", "type": "main", "index": 0 }],
+        [{ "node": "Error Trigger", "type": "main", "index": 0 }]
+      ]
+    },
+    "Keyword Generator": {
+      "main": [[
+        { "node": "Macrocosmos Discovery", "type": "main", "index": 0 },
+        { "node": "Google Trends Puller", "type": "main", "index": 0 },
+        { "node": "RiteTag Analyzer", "type": "main", "index": 0 },
+        { "node": "BuzzSumo Competitor", "type": "main", "index": 0 },
+        { "node": "Sheets Idea Import", "type": "main", "index": 0 }
+      ]]
+    },
+    "Macrocosmos Discovery": {
+      "main": [[{ "node": "Merge Discovery Data", "type": "main", "index": 0 }]]
+    },
+    "Google Trends Puller": {
+      "main": [[{ "node": "Merge Discovery Data", "type": "main", "index": 1 }]]
+    },
+    "RiteTag Analyzer": {
+      "main": [[{ "node": "Merge Discovery Data", "type": "main", "index": 2 }]]
+    },
+    "BuzzSumo Competitor": {
+      "main": [[{ "node": "Merge Discovery Data", "type": "main", "index": 3 }]]
+    },
+    "Sheets Idea Import": {
+      "main": [[{ "node": "Merge Discovery Data", "type": "main", "index": 4 }]]
+    },
+    "Merge Discovery Data": {
+      "main": [[{ "node": "Viral Score Calculator", "type": "main", "index": 0 }]]
+    },
+    "Viral Score Calculator": {
+      "main": [[{ "node": "Deduplication Filter", "type": "main", "index": 0 }]]
+    },
+    "Deduplication Filter": {
+      "main": [[{ "node": "Content Filter", "type": "main", "index": 0 }]]
+    },
+    "Content Filter": {
+      "main": [
+        [{ "node": "RabbitMQ Enqueue", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "RabbitMQ Dequeue": {
+      "main": [[{ "node": "AI Agent", "type": "main", "index": 0 }]]
+    },
+    "AI Agent": {
+      "main": [[{ "node": "Prompt Engineer", "type": "main", "index": 0 }]]
+    },
+    "Prompt Engineer": {
+      "main": [[
+        { "node": "Generate Text", "type": "main", "index": 0 },
+        { "node": "Generate Image", "type": "main", "index": 0 },
+        { "node": "Generate Video", "type": "main", "index": 0 }
+      ]]
+    },
+    "Generate Text": {
+      "main": [[{ "node": "Moderation Check", "type": "main", "index": 0 }]]
+    },
+    "Moderation Check": {
+      "main": [[{ "node": "IF Content Safe", "type": "main", "index": 0 }]]
+    },
+    "IF Content Safe": {
+      "main": [
+        [{ "node": "A/B Splitter", "type": "main", "index": 0 }],
+        [{ "node": "Fallback Claude", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fallback Claude": {
+      "main": [[{ "node": "Platform Formatter", "type": "main", "index": 0 }]]
+    },
+    "A/B Splitter": {
+      "main": [[{ "node": "Platform Formatter", "type": "main", "index": 0 }]]
+    },
+    "Platform Formatter": {
+      "main": [
+        [{ "node": "TikTok Publisher", "type": "main", "index": 0 }],
+        [{ "node": "Instagram Reels Publisher", "type": "main", "index": 0 }],
+        [{ "node": "LinkedIn Publisher", "type": "main", "index": 0 }],
+        [
+          { "node": "Facebook MCP Publisher", "type": "main", "index": 0 },
+          { "node": "YouTube Shorts Publisher", "type": "main", "index": 0 },
+          { "node": "WordPress Publisher", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "TikTok Publisher": {
+      "main": [[{ "node": "Publishing Results Collector", "type": "main", "index": 0 }]]
+    },
+    "Instagram Reels Publisher": {
+      "main": [[{ "node": "Publishing Results Collector", "type": "main", "index": 1 }]]
+    },
+    "Facebook MCP Publisher": {
+      "main": [[{ "node": "Publishing Results Collector", "type": "main", "index": 2 }]]
+    },
+    "LinkedIn Publisher": {
+      "main": [[{ "node": "Publishing Results Collector", "type": "main", "index": 3 }]]
+    },
+    "YouTube Shorts Publisher": {
+      "main": [[{ "node": "Publishing Results Collector", "type": "main", "index": 4 }]]
+    },
+    "WordPress Publisher": {
+      "main": [[{ "node": "Publishing Results Collector", "type": "main", "index": 5 }]]
+    },
+    "Publishing Results Collector": {
+      "main": [[{ "node": "Analytics Writer", "type": "main", "index": 0 }]]
+    },
+    "Publishing Scheduler": {
+      "main": [[
+        { "node": "GA4 Collector", "type": "main", "index": 0 },
+        { "node": "Platform Insights Fetcher", "type": "main", "index": 0 }
+      ]]
+    },
+    "GA4 Collector": {
+      "main": [[{ "node": "Variant Comparator", "type": "main", "index": 0 }]]
+    },
+    "Platform Insights Fetcher": {
+      "main": [[{ "node": "Variant Comparator", "type": "main", "index": 0 }]]
+    },
+    "Variant Comparator": {
+      "main": [[{ "node": "Virality Predictor", "type": "main", "index": 0 }]]
+    },
+    "Virality Predictor": {
+      "main": [[{ "node": "Prompt Optimizer", "type": "main", "index": 0 }]]
+    },
+    "Prompt Optimizer": {
+      "main": [[{ "node": "Daily Digest Generator", "type": "main", "index": 0 }]]
+    },
+    "Daily Digest Generator": {
+      "main": [[{ "node": "Digest Sender", "type": "main", "index": 0 }]]
+    },
+    "Error Trigger": {
+      "main": [[
+        { "node": "Slack Alert", "type": "main", "index": 0 },
+        { "node": "PagerDuty Alert", "type": "main", "index": 0 }
+      ]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "error-handler"
+  },
+  "versionId": "production-v1",
+  "id": "ProductionViralPublisher",
+  "meta": {
+    "instanceId": "8c8c5237b8e37b006a7adce87f4369350c58e41f3ca501d19b1e4d58e6ab5125"
+  },
+  "tags": ["production", "viral", "ai", "social-media"]
+}

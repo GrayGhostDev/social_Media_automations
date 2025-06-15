@@ -1,0 +1,219 @@
+{
+  "name": "Mini AI Publisher - Starter Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "1",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "read",
+        "sheetId": "={{$env.GOOGLE_SHEET_ID}}",
+        "range": "Ideas!A2:B",
+        "options": {
+          "returnAllMatches": true
+        }
+      },
+      "id": "2",
+      "name": "Sheets Idea Import",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.2,
+      "position": [450, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "googleSheets",
+          "name": "Google Sheets Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "3",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "promptSystem",
+              "name": "promptSystem",
+              "value": "You are BrandVoiceBot, an expert social media content creator. You understand viral trends, engagement patterns, and platform-specific best practices. Your content is always engaging, authentic, and optimized for the target platform.",
+              "type": "string"
+            },
+            {
+              "id": "promptUser",
+              "name": "promptUser",
+              "value": "=Write a LinkedIn post about {{$json.idea}} in 280 characters. Include relevant hashtags and end with a thought-provoking question.",
+              "type": "string"
+            },
+            {
+              "id": "chosenModel",
+              "name": "chosenModel",
+              "value": "={{ $json.complexity === 'high' ? 'gpt-4' : 'gpt-3.5-turbo' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4",
+      "name": "Prompt Engineer",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "resource": "text",
+        "operation": "message",
+        "modelId": "={{ $node['Prompt Engineer'].json.chosenModel }}",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "={{ $node['Prompt Engineer'].json.promptSystem }}"
+            },
+            {
+              "role": "user",
+              "content": "={{ $node['Prompt Engineer'].json.promptUser }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.8,
+          "maxTokens": 300
+        }
+      },
+      "id": "5",
+      "name": "Generate Text",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.3,
+      "position": [1050, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai_cred",
+          "name": "OpenAI Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{$env.SLACK_WEBHOOK_URL}}",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "text",
+              "value": "=🚀 *New AI-Generated Content*\\n\\n{{$json.choices[0].message.content}}\\n\\n_Generated from: {{$node['Sheets Idea Import'].json.idea}}_"
+            }
+          ]
+        }
+      },
+      "id": "6",
+      "name": "Publish to Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1250, 300]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Sheets Idea Import",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets Idea Import": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Prompt Engineer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prompt Engineer": {
+      "main": [
+        [
+          {
+            "node": "Generate Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Text": {
+      "main": [
+        [
+          {
+            "node": "Publish to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "starter-v1",
+  "id": "MiniAIPublisher",
+  "meta": {
+    "instanceId": "8c8c5237b8e37b006a7adce87f4369350c58e41f3ca501d19b1e4d58e6ab5126"
+  },
+  "tags": ["starter", "ai", "simple"]
+}
