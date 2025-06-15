@@ -1,0 +1,306 @@
+{
+  "name": "AI Viral Content Publisher",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "e8c3f8d1-4b5a-4c3d-9e2f-1a2b3c4d5e6f",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.example.com/trending",
+        "authentication": "none",
+        "method": "GET",
+        "options": {},
+        "headerParametersUi": {
+          "parameter": []
+        }
+      },
+      "id": "f9d4e5c6-5b6a-5d4e-af3g-2b3c4d5e6f7g",
+      "name": "Fetch Trending Content",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.OPENAI_API_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "model",
+              "value": "gpt-3.5-turbo"
+            },
+            {
+              "name": "messages",
+              "value": "={{ [{\"role\": \"system\", \"content\": \"You are a viral content creator. Rewrite content to be engaging, shareable, and optimized for social media. Keep it concise and add relevant emojis.\"}, {\"role\": \"user\", \"content\": \"Rewrite this for maximum engagement: \" + $json.content}] }}"
+            },
+            {
+              "name": "temperature",
+              "value": "0.8"
+            },
+            {
+              "name": "max_tokens",
+              "value": "300"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-6c7d-6e5f-bg4h-3c4d5e6f7g8h",
+      "name": "Generate with OpenAI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Import custom functions (if NODE_FUNCTION_ALLOW_EXTERNAL is set)\n// const { calculateViralScore } = require('/home/node/.n8n/custom/functions/viralScore.js');\n// const { moderateContent } = require('/home/node/.n8n/custom/functions/contentModeration.js');\n\n// For now, implement inline for compatibility\nconst content = $json.choices?.[0]?.message?.content || \"\";\nlet useFallback = false;\nlet viralScore = 0;\nlet moderationIssues = [];\n\n// Simple viral scoring\nif (content.length >= 80 && content.length <= 280) {\n  viralScore += 30;\n}\nif (content.includes('?')) {\n  viralScore += 20;\n}\nif (content.match(/[\\u{1F600}-\\u{1F64F}]/gu)) {\n  viralScore += 25;\n}\n\n// Simple moderation check\nconst sensitiveTerms = ['violence', 'hate', 'explicit'];\nconst contentLower = content.toLowerCase();\nsensitiveTerms.forEach(term => {\n  if (contentLower.includes(term)) {\n    moderationIssues.push(term);\n    useFallback = true;\n  }\n});\n\n// Check if content is too short or failed generation\nif (content.length < 50 || !content) {\n  useFallback = true;\n}\n\nreturn [{\n  content,\n  useFallback,\n  viralScore,\n  moderationIssues,\n  originalContent: $node[\"Fetch Trending Content\"].json.content\n}];"
+      },
+      "id": "b2c3d4e5-7d8e-7f6g-ch5i-4d5e6f7g8h9i",
+      "name": "Viral Score & Moderation",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.useFallback}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "c3d4e5f6-8e9f-8g7h-di6j-5e6f7g8h9i0j",
+      "name": "IF Fallback Needed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "x-api-key",
+              "value": "={{$env.ANTHROPIC_API_KEY}}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "model",
+              "value": "claude-3-sonnet-20240229"
+            },
+            {
+              "name": "max_tokens",
+              "value": "300"
+            },
+            {
+              "name": "messages",
+              "value": "={{ [{\"role\": \"user\", \"content\": \"Please rewrite the following content to be engaging but also highly appropriate and compliant with all content policies. Make it shareable and add appropriate emojis: \" + $node[\"Viral Score & Moderation\"].json.originalContent}] }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d4e5f6g7-9f0g-9h8i-ej7k-6f7g8h9i0j1k",
+      "name": "Generate with Anthropic",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1250, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SLACK_WEBHOOK_URL}}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "text",
+              "value": "=🔥 *Viral Content Update*\\n\\n{{$json.content}}\\n\\n_Score: {{$json.viralScore}}/100_"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e5f6g7h8-0g1h-0i9j-fk8l-7g8h9i0j1k2l",
+      "name": "Publish to Slack (OpenAI)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1250, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SLACK_WEBHOOK_URL}}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "text",
+              "value": "=🔄 *Viral Content Update (Compliance Mode)*\\n\\n{{$json.content[0].text}}\\n\\n_Generated with enhanced compliance checks_"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f6g7h8i9-1h2i-1j0k-gl9m-8h9i0j1k2l3m",
+      "name": "Publish to Slack (Anthropic)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1450, 400]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Trending Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Trending Content": {
+      "main": [
+        [
+          {
+            "node": "Generate with OpenAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate with OpenAI": {
+      "main": [
+        [
+          {
+            "node": "Viral Score & Moderation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Viral Score & Moderation": {
+      "main": [
+        [
+          {
+            "node": "IF Fallback Needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Fallback Needed?": {
+      "main": [
+        [
+          {
+            "node": "Publish to Slack (OpenAI)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate with Anthropic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate with Anthropic": {
+      "main": [
+        [
+          {
+            "node": "Publish to Slack (Anthropic)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "01234567-89ab-cdef-0123-456789abcdef",
+  "id": "zVkSdW3HQwYxLfKj",
+  "meta": {
+    "instanceId": "8c8c5237b8e37b006a7adce87f4369350c58e41f3ca501d19b1e4d58e6ab5123"
+  },
+  "tags": []
+}
