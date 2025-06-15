@@ -6,8 +6,10 @@
 # Data directories
 data/postgres/*
 data/rabbitmq/*
+mcp-data/*
 !data/postgres/.gitkeep
 !data/rabbitmq/.gitkeep
+!mcp-data/.gitkeep
 
 # n8n data
 n8n_data/

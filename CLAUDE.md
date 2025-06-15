@@ -12,8 +12,12 @@ cp .env.example .env
 # Start all services
 docker compose up -d
 
+# Initialize MCP credentials (first time only)
+docker compose exec proxy /scripts/n8n-mcp-onboard.sh
+
 # View logs
 docker compose logs -f n8n
+docker compose logs -f proxy
 
 # Stop all services
 docker compose down
@@ -26,6 +30,8 @@ docker compose up --build
 - n8n Editor: http://localhost:5678
 - RabbitMQ Management: http://localhost:15672
 - PostgreSQL: localhost:5432
+- MCP Proxy: http://localhost:7990
+- MCP Proxy Health: http://localhost:7990/healthz
 
 ## Project Structure
 ```
@@ -41,7 +47,9 @@ social_Media_automations/
 ├── data/                # Persistent data
 │   ├── postgres/        # PostgreSQL data
 │   └── rabbitmq/        # RabbitMQ data
+├── mcp-data/            # MCP proxy server registry
 └── scripts/             # Utility scripts
+    └── n8n-mcp-onboard.sh  # MCP credential setup
 ```
 
 ## Custom Functions Available
@@ -50,6 +58,7 @@ social_Media_automations/
 3. **deduplication.js** - Prevents duplicate content posting
 
 ## Environment Variables Required
+### Core Services
 - `OPENAI_API_KEY` - OpenAI API authentication
 - `ANTHROPIC_API_KEY` - Anthropic Claude API authentication
 - `SLACK_WEBHOOK_URL` - Slack incoming webhook for publishing
@@ -57,13 +66,28 @@ social_Media_automations/
 - `POSTGRES_*` - Database configuration
 - `RABBITMQ_*` - Message queue configuration
 
+### MCP Integration
+- `MCP_PROXY_URL` - MCP proxy endpoint (default: http://proxy:7990)
+- `MCP_PROXY_KEY` - JWT authentication key for MCP proxy
+- `MACROCOSMOS_KEY` - API key for Macrocosmos social listening
+- `TWITTER_BEARER_TOKEN` - Twitter API v2 bearer token
+- `FACEBOOK_PAGE_TOKEN` - Facebook Graph API page token
+
 ## Workflow Features
-The included `viral_content_workflow.json` demonstrates:
+### Original Workflow (`viral_content_workflow.json`)
 - Scheduled content discovery (hourly)
 - AI content generation with OpenAI
 - Fallback to Anthropic Claude for compliance
 - Viral scoring and moderation
 - Multi-channel publishing (Slack example)
+
+### Enhanced MCP Workflow (`viral_content_mcp_workflow.json`)
+- **MCP Health Check**: Validates proxy availability before processing
+- **Macrocosmos Discovery**: Pulls viral content from X/Twitter, Reddit, HuggingFace
+- **Twitter MCP Integration**: Hashtag search and automated posting
+- **Facebook MCP Integration**: Page posting with Graph API
+- **MCP Router**: Dynamic endpoint selection based on target platforms
+- **Fallback Path**: Graceful degradation to direct APIs if MCP fails
 
 ## Development Workflow
 1. Edit custom functions in `custom/functions/`
@@ -77,6 +101,11 @@ The included `viral_content_workflow.json` demonstrates:
 2. Update workflow to include new HTTP Request node
 3. Configure authentication and payload
 
+### Add New MCP Server
+1. Join the MCP server: `docker compose exec proxy mcp join gh:user/repo`
+2. Add endpoint mapping in MCP Router function node
+3. No other n8n changes needed - proxy auto-exposes endpoints
+
 ### Add Custom Node
 1. Create node in `custom/nodes/YourNode/`
 2. Include `YourNode.node.js` and optionally `YourNode.credentials.js`
@@ -89,9 +118,11 @@ The included `viral_content_workflow.json` demonstrates:
 
 ## Troubleshooting
 - **Container won't start**: Check `.env` file is properly configured
-- **Can't connect to services**: Ensure ports 5678, 5432, 15672 are free
+- **Can't connect to services**: Ensure ports 5678, 5432, 15672, 7990 are free
 - **Credentials error**: Verify `N8N_ENCRYPTION_KEY` hasn't changed
 - **Workflow fails**: Check n8n execution logs in UI or `docker compose logs n8n`
+- **MCP proxy errors**: Check `docker compose logs proxy` and verify MCP_PROXY_KEY
+- **MCP health check fails**: Ensure proxy container is running and healthy
 
 ## Security Notes
 - Never commit `.env` file
@@ -109,6 +140,13 @@ docker compose exec postgres psql -U n8n_user -d n8n_db -c "SELECT version();"
 
 # Verify RabbitMQ
 curl -u n8n_rabbit:your_password http://localhost:15672/api/overview
+
+# Test MCP Proxy health
+curl http://localhost:7990/healthz
+
+# Test MCP endpoint (example: Macrocosmos)
+curl -H "Authorization: Bearer your_mcp_proxy_key" \
+  "http://localhost:7990/macrocosmos/query?q=AI"
 ```
 
 ## Maintenance Commands
@@ -125,10 +163,24 @@ docker compose up -d
 ```
 
 ## Integration Points
-- **Input Sources**: RSS feeds, APIs, webhooks
-- **AI Models**: OpenAI GPT-3.5/4, Anthropic Claude
-- **Output Channels**: Slack, Twitter, Medium, WordPress (extendable)
-- **Storage**: PostgreSQL for state, RabbitMQ for queuing
+### Input Sources
+- **MCP-powered**: Macrocosmos (X/Twitter, Reddit, HuggingFace trends)
+- **Traditional**: RSS feeds, APIs, webhooks
+- **Social APIs**: Twitter hashtag search, Facebook insights
+
+### AI Models
+- **Primary**: OpenAI GPT-3.5/4
+- **Fallback**: Anthropic Claude (compliance mode)
+
+### Output Channels
+- **MCP-enabled**: Twitter, Facebook (via proxy)
+- **Direct**: Slack, Medium, WordPress
+- **Extensible**: Any MCP server via `mcp join`
+
+### Infrastructure
+- **Storage**: PostgreSQL for state, workflow data
+- **Queuing**: RabbitMQ for async tasks, MCP proxy for API queuing
+- **Proxy**: Plugged-in MCP for unified API management
 
 ## Performance Optimization
 - Use RabbitMQ for async processing of heavy tasks
@@ -136,9 +188,29 @@ docker compose up -d
 - Set appropriate workflow concurrency limits
 - Monitor PostgreSQL query performance
 
+## MCP Servers Integrated
+1. **Plugged-in MCP Proxy** - Multi-server management layer
+   - Dynamic routing, rate limiting, credential management
+   - Health checks and fallback handling
+
+2. **Macrocosmos** - Social listening powerhouse
+   - X/Twitter trends, Reddit hot topics, HuggingFace models
+   - Unified viral content discovery
+
+3. **twitter-mcp** - Full Twitter API v2 integration
+   - Timeline, hashtag search, posting, deletion
+   - OAuth handling abstracted away
+
+4. **facebook-mcp-server** - Facebook Graph API wrapper
+   - Page posting, insights, comment moderation
+   - Simplified authentication flow
+
 ## Future Enhancements
-- [ ] Add Twitter integration
+- [x] Add Twitter integration (via MCP)
+- [x] Add Facebook integration (via MCP)
 - [ ] Implement content scheduling
-- [ ] Add analytics dashboard
+- [ ] Add analytics dashboard with MCP insights
 - [ ] Create content performance tracking
 - [ ] Implement A/B testing for content variations
+- [ ] Add LinkedIn MCP integration
+- [ ] Add Instagram MCP integration

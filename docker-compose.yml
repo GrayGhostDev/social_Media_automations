@@ -28,6 +28,7 @@ services:
     depends_on:
       - postgres
       - rabbitmq
+      - proxy
     restart: unless-stopped
     networks:
       - n8n-network
@@ -72,8 +73,33 @@ services:
       timeout: 5s
       retries: 5
 
+  proxy:
+    image: veriteknik/pluggedin-mcp-proxy:latest
+    container_name: n8n_mcp_proxy
+    environment:
+      - MCP_PROXY_KEY=${MCP_PROXY_KEY}
+      - LOG_LEVEL=info
+      - POSTGRES_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    volumes:
+      - ./mcp-data:/data
+      - ./scripts:/scripts:ro
+    ports:
+      - "7990:7990"
+    depends_on:
+      - postgres
+      - rabbitmq
+    restart: unless-stopped
+    networks:
+      - n8n-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7990/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
 volumes:
   n8n_data:
+  mcp_data:
 
 networks:
   n8n-network:

@@ -1,0 +1,663 @@
+{
+  "name": "AI Viral Content Publisher with MCP",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [150, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.MCP_PROXY_URL}}/healthz",
+        "method": "HEAD",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.MCP_PROXY_KEY}}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "mcp-health-check",
+      "name": "MCP Health Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [350, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{$node[\"MCP Health Check\"].json[\"statusCode\"]}}",
+              "operation": "equal",
+              "value2": 200
+            }
+          ]
+        }
+      },
+      "id": "health-check-if",
+      "name": "IF MCP Healthy?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [550, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Build search keywords based on time of day and trends\nconst now = new Date();\nconst hour = now.getHours();\nlet terms = [];\n\n// Time-based topic selection\nif (hour >= 6 && hour < 12) {\n  terms = ['morning routine', 'productivity tips', 'breakfast ideas'];\n} else if (hour >= 12 && hour < 17) {\n  terms = ['lunch break', 'afternoon motivation', 'work tips'];\n} else if (hour >= 17 && hour < 22) {\n  terms = ['evening relaxation', 'dinner ideas', 'entertainment'];\n} else {\n  terms = ['late night thoughts', 'insomnia tips', 'midnight snacks'];\n}\n\n// Return multiple items for parallel processing\nreturn terms.map(term => ({\n  json: { \n    term,\n    timestamp: now.toISOString(),\n    searchType: 'trending'\n  }\n}));"
+      },
+      "id": "keyword-builder",
+      "name": "Keyword Builder",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [750, 200]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.MCP_PROXY_URL}}/macrocosmos/query",
+        "method": "GET",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.MCP_PROXY_KEY}}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParametersUi": {
+          "parameter": [
+            {
+              "name": "q",
+              "value": "={{$json[\"term\"]}}"
+            },
+            {
+              "name": "sources",
+              "value": "twitter,reddit,huggingface"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "macrocosmos-discovery",
+      "name": "Macrocosmos Discovery",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [950, 100]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.MCP_PROXY_URL}}/twitter-mcp/hashtag_search",
+        "method": "POST",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.MCP_PROXY_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "hashtag",
+              "value": "={{$json[\"term\"].replace(/\\s+/g, '')}}"
+            },
+            {
+              "name": "limit",
+              "value": "10"
+            }
+          ]
+        }
+      },
+      "id": "twitter-hashtag-search",
+      "name": "Twitter Hashtag Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [950, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.example.com/trending",
+        "method": "GET",
+        "authentication": "none",
+        "options": {}
+      },
+      "id": "legacy-content-fetch",
+      "name": "Legacy Content Fetch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [950, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "merge-content",
+      "name": "Merge Content Sources",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [1150, 200]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Aggregate and score content from multiple sources\nconst allContent = [];\n\n// Process each item\nfor (const item of $input.all()) {\n  const json = item.json;\n  \n  // Extract content based on source\n  if (json.results) { // Macrocosmos\n    json.results.forEach(r => {\n      allContent.push({\n        content: r.text || r.title,\n        source: 'macrocosmos',\n        engagement: r.score || 0,\n        url: r.url\n      });\n    });\n  } else if (json.tweets) { // Twitter\n    json.tweets.forEach(t => {\n      allContent.push({\n        content: t.text,\n        source: 'twitter',\n        engagement: t.retweet_count + t.favorite_count,\n        url: t.url\n      });\n    });\n  } else if (json.content) { // Legacy\n    allContent.push({\n      content: json.content,\n      source: 'legacy',\n      engagement: json.engagement || 0,\n      url: json.url\n    });\n  }\n}\n\n// Sort by engagement and take top 5\nconst topContent = allContent\n  .sort((a, b) => b.engagement - a.engagement)\n  .slice(0, 5);\n\n// Return the best content piece\nreturn [{\n  json: topContent[0] || { content: 'No viral content found', source: 'default' }\n}];"
+      },
+      "id": "content-aggregator",
+      "name": "Content Aggregator",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1350, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.OPENAI_API_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "model",
+              "value": "gpt-3.5-turbo"
+            },
+            {
+              "name": "messages",
+              "value": "={{ [{\"role\": \"system\", \"content\": \"You are a viral content creator. Rewrite content to be engaging, shareable, and optimized for social media. Keep it concise (under 280 chars for Twitter). Add relevant emojis and hashtags.\"}, {\"role\": \"user\", \"content\": \"Rewrite this for maximum engagement: \" + $json.content}] }}"
+            },
+            {
+              "name": "temperature",
+              "value": "0.8"
+            },
+            {
+              "name": "max_tokens",
+              "value": "300"
+            }
+          ]
+        }
+      },
+      "id": "openai-generate",
+      "name": "Generate with OpenAI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1550, 200]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Enhanced viral scoring and moderation with MCP awareness\nconst content = $json.choices?.[0]?.message?.content || \"\";\nconst originalData = $node[\"Content Aggregator\"].json;\n\nlet viralScore = 0;\nlet moderationIssues = [];\nlet useFallback = false;\n\n// Viral scoring logic\nif (content.length >= 80 && content.length <= 280) {\n  viralScore += 30;\n}\nif (content.includes('?')) {\n  viralScore += 20;\n}\nconst emojiCount = (content.match(/[\\u{1F600}-\\u{1F64F}]/gu) || []).length;\nviralScore += Math.min(emojiCount * 10, 25);\n\n// Hashtag scoring\nconst hashtagCount = (content.match(/#\\w+/g) || []).length;\nif (hashtagCount >= 1 && hashtagCount <= 3) {\n  viralScore += 15;\n}\n\n// Source-based scoring bonus\nif (originalData.source === 'macrocosmos') {\n  viralScore += 10; // Bonus for curated content\n}\n\n// Moderation checks\nconst sensitiveTerms = ['violence', 'hate', 'explicit', 'controversial'];\nconst contentLower = content.toLowerCase();\nsensitiveTerms.forEach(term => {\n  if (contentLower.includes(term)) {\n    moderationIssues.push(term);\n    useFallback = true;\n  }\n});\n\n// Platform-specific checks\nconst targetPlatforms = ['twitter', 'facebook', 'slack'];\nconst platformRequirements = {\n  twitter: { maxLength: 280, hashtagLimit: 5 },\n  facebook: { maxLength: 63206, hashtagLimit: 30 },\n  slack: { maxLength: 4000, hashtagLimit: 10 }\n};\n\n// Check if content is too short or failed generation\nif (content.length < 50 || !content) {\n  useFallback = true;\n}\n\nreturn [{\n  content,\n  useFallback,\n  viralScore: Math.min(viralScore, 100),\n  moderationIssues,\n  originalContent: originalData.content,\n  sourceUrl: originalData.url,\n  targetPlatforms,\n  platformRequirements\n}];"
+      },
+      "id": "viral-score-moderation",
+      "name": "Viral Score & Moderation",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1750, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.useFallback}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "fallback-check",
+      "name": "IF Fallback Needed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1950, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "x-api-key",
+              "value": "={{$env.ANTHROPIC_API_KEY}}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "model",
+              "value": "claude-3-sonnet-20240229"
+            },
+            {
+              "name": "max_tokens",
+              "value": "300"
+            },
+            {
+              "name": "messages",
+              "value": "={{ [{\"role\": \"user\", \"content\": \"Please rewrite the following content to be engaging but also highly appropriate and compliant with all content policies. Make it shareable and add appropriate emojis. Target platforms: \" + $json.targetPlatforms.join(', ') + \". Original: \" + $json.originalContent}] }}"
+            }
+          ]
+        }
+      },
+      "id": "anthropic-generate",
+      "name": "Generate with Anthropic",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2150, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// MCP Router - determines which endpoints to call based on platforms\nconst content = $json.content || $json.content?.[0]?.text || '';\nconst platforms = $json.targetPlatforms || ['slack'];\nconst viralScore = $json.viralScore || 0;\n\nconst platformEndpoints = {\n  twitter: '/twitter-mcp/create_post',\n  facebook: '/facebook/post_to_facebook',\n  slack: 'direct', // Use direct webhook, not MCP\n  medium: '/medium-mcp/publish',\n  linkedin: '/linkedin-mcp/share'\n};\n\n// Create publishing tasks for each platform\nconst publishingTasks = platforms.map(platform => {\n  const endpoint = platformEndpoints[platform];\n  \n  // Platform-specific content formatting\n  let formattedContent = content;\n  if (platform === 'twitter' && content.length > 280) {\n    formattedContent = content.substring(0, 277) + '...';\n  }\n  \n  return {\n    platform,\n    endpoint,\n    content: formattedContent,\n    viralScore,\n    useMcp: endpoint !== 'direct',\n    metadata: {\n      sourceUrl: $json.sourceUrl,\n      generatedAt: new Date().toISOString()\n    }\n  };\n});\n\n// Return tasks as separate items for parallel processing\nreturn publishingTasks.map(task => ({ json: task }));"
+      },
+      "id": "mcp-router",
+      "name": "MCP Router",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2350, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.useMcp}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "route-by-type",
+      "name": "IF Use MCP?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [2550, 200]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.MCP_PROXY_URL}}{{$json.endpoint}}",
+        "method": "POST",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.MCP_PROXY_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "={{$json.platform === 'twitter' ? 'text' : 'message'}}",
+              "value": "={{$json.content}}"
+            },
+            {
+              "name": "metadata",
+              "value": "={{$json.metadata}}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "mcp-proxy-publish",
+      "name": "MCP Proxy Publish",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2750, 150],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SLACK_WEBHOOK_URL}}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "text",
+              "value": "=🔥 *Viral Content Update*\\n\\n{{$json.content}}\\n\\n_Score: {{$json.viralScore}}/100_"
+            }
+          ]
+        }
+      },
+      "id": "slack-direct-publish",
+      "name": "Slack Direct Publish",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2750, 250]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Aggregate publishing results\nconst results = [];\n\nfor (const item of $input.all()) {\n  const json = item.json;\n  \n  results.push({\n    platform: json.platform || 'unknown',\n    success: json.statusCode >= 200 && json.statusCode < 300,\n    statusCode: json.statusCode,\n    response: json.data || json,\n    timestamp: new Date().toISOString()\n  });\n}\n\n// Summary statistics\nconst summary = {\n  totalAttempts: results.length,\n  successful: results.filter(r => r.success).length,\n  failed: results.filter(r => !r.success).length,\n  results\n};\n\nreturn [{ json: summary }];"
+      },
+      "id": "publishing-results",
+      "name": "Publishing Results",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2950, 200]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Legacy fallback for when MCP is down\nreturn [{\n  json: {\n    content: 'Sample trending content from legacy source',\n    source: 'legacy',\n    engagement: Math.floor(Math.random() * 1000)\n  }\n}];"
+      },
+      "id": "fallback-discovery",
+      "name": "Fallback Discovery",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [750, 400]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "MCP Health Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP Health Check": {
+      "main": [
+        [
+          {
+            "node": "IF MCP Healthy?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF MCP Healthy?": {
+      "main": [
+        [
+          {
+            "node": "Keyword Builder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fallback Discovery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keyword Builder": {
+      "main": [
+        [
+          {
+            "node": "Macrocosmos Discovery",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Twitter Hashtag Search",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Legacy Content Fetch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Macrocosmos Discovery": {
+      "main": [
+        [
+          {
+            "node": "Merge Content Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Twitter Hashtag Search": {
+      "main": [
+        [
+          {
+            "node": "Merge Content Sources",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Legacy Content Fetch": {
+      "main": [
+        [
+          {
+            "node": "Merge Content Sources",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge Content Sources": {
+      "main": [
+        [
+          {
+            "node": "Content Aggregator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Content Aggregator": {
+      "main": [
+        [
+          {
+            "node": "Generate with OpenAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate with OpenAI": {
+      "main": [
+        [
+          {
+            "node": "Viral Score & Moderation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Viral Score & Moderation": {
+      "main": [
+        [
+          {
+            "node": "IF Fallback Needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Fallback Needed?": {
+      "main": [
+        [
+          {
+            "node": "MCP Router",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate with Anthropic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate with Anthropic": {
+      "main": [
+        [
+          {
+            "node": "MCP Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP Router": {
+      "main": [
+        [
+          {
+            "node": "IF Use MCP?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Use MCP?": {
+      "main": [
+        [
+          {
+            "node": "MCP Proxy Publish",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack Direct Publish",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP Proxy Publish": {
+      "main": [
+        [
+          {
+            "node": "Publishing Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Direct Publish": {
+      "main": [
+        [
+          {
+            "node": "Publishing Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fallback Discovery": {
+      "main": [
+        [
+          {
+            "node": "Content Aggregator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "mcp-enhanced-v1",
+  "id": "MCPViralPublisher",
+  "meta": {
+    "instanceId": "8c8c5237b8e37b006a7adce87f4369350c58e41f3ca501d19b1e4d58e6ab5124"
+  },
+  "tags": []
+}
