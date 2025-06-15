@@ -199,7 +199,7 @@
       "type": "n8n-nodes-base.function",
       "typeVersion": 1,
       "parameters": {
-        "functionCode": "// Calculate optimal posting time\nconst smartScheduler = require('/home/node/.n8n/custom/functions/smartScheduler.js');\n\nconst platform = items[0].json.platform;\nconst scheduling = smartScheduler.calculateBestTime(platform, {\n  target_timezone: $vars.TARGET_TIMEZONE || 'America/New_York',\n  content_type: items[0].json.content_type || 'general',\n  user_analytics: items[0].json.analytics || null\n});\n\nitems[0].json.best_time = new Date(scheduling.best_time).getTime();\nitems[0].json.scheduling_score = scheduling.score;\nitems[0].json.scheduling_reason = scheduling.reasoning;\n\n// Calculate delay in milliseconds\nconst delayMs = Math.max(0, items[0].json.best_time - Date.now());\nitems[0].json.delay_ms = delayMs;\n\n// If delay is more than 24 hours, cap it\nif (delayMs > 86400000) {\n  items[0].json.delay_ms = 86400000;\n  items[0].json.scheduling_note = 'Capped at 24 hours';\n}\n\nreturn items;"
+        "functionCode": "// Calculate optimal posting time\nconst smartScheduler = require('/home/node/.n8n/custom/functions/smartScheduler.js');\n\nconst platform = items[0].json.platform;\nconst scheduling = smartScheduler.calculateBestTime(platform, {\n  target_timezone: $vars.TARGET_TIMEZONE || 'America/New_York',\n  content_type: items[0].json.content_type || 'general',\n  user_analytics: items[0].json.analytics || null\n});\n\nitems[0].json.best_time = new Date(scheduling.best_time).getTime();\nitems[0].json.scheduling_score = scheduling.score;\nitems[0].json.scheduling_reason = scheduling.reasoning;\n\n// Calculate delay in milliseconds and ensure it's never negative\nconst currentTime = Date.now();\nconst targetTime = items[0].json.best_time;\nlet delayMs = targetTime - currentTime;\n\n// Cap negative delays to 0 (when best_time is already past)\nif (delayMs < 0) {\n  delayMs = 0;\n  items[0].json.scheduling_note = 'Best time already passed, posting immediately';\n}\n// If delay is more than 24 hours, cap it\nelse if (delayMs > 86400000) {\n  delayMs = 86400000;\n  items[0].json.scheduling_note = 'Capped at 24 hours';\n}\n\nitems[0].json.delay_ms = delayMs;\n\nreturn items;"
       },
       "position": [1280, 400]
     },
@@ -403,6 +403,15 @@
     },
     "MCP Health Check": {
       "main": [
+        [
+          {
+            "node": "Keyword Builder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
         [
           {
             "node": "Keyword Builder",

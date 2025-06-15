@@ -1,0 +1,138 @@
+# Social Media Automation System - Cursor Rules
+
+## Project Overview
+This is a comprehensive social media automation system built on n8n workflow automation platform. It uses AI to discover viral content, regenerate it, and publish across multiple platforms.
+
+## Architecture
+- **Orchestrator**: ViralHub workflow manages the entire pipeline
+- **Queue-based**: RabbitMQ for message queuing and rate limiting
+- **Multi-container**: Docker Compose orchestration
+- **AI-powered**: Multiple LLMs (GPT-4, Claude, Gemini, Groq)
+- **MCP Integration**: Unified API management via MCP proxy
+
+## Key Components
+
+### Core Services
+- n8n (workflow engine) - queue mode enabled
+- PostgreSQL (data persistence)
+- RabbitMQ (message queue)
+- Redis (queue mode support)
+- Vector (centralized logging)
+- MCP Proxy (API unification)
+
+### Workflow Structure
+1. **ViralHub** (root orchestrator)
+   - Discovers ideas → Generates assets → QCs → Formats → Publishes → Analyses
+   - Queue-based processing with retry logic
+   - Global error handling
+
+2. **Sub-workflows** (Execute Workflow pattern)
+   - ResearchFetcher: Trend discovery
+   - ContentFactory: Multi-modal content generation
+   - ContentQCSuite: Quality control
+   - PublisherFormatter: Platform-specific formatting
+   - AnalyticsLoop: Performance tracking
+
+### Custom Functions (JavaScript/TypeScript)
+- `viralScore.js`: ML-based virality prediction
+- `deduplication.js`: Content similarity detection
+- `aiRouter.js`: Cost-optimized model routing
+- `promptSelector.js`: Google Sheets prompt management
+- `smartScheduler.js`: Optimal posting time calculation
+
+### Database Schema
+- `content_discovery`: Raw discovered content
+- `generated_content`: AI-generated assets
+- `post_metrics`: Performance tracking
+- `model_performance`: AI model analytics
+- `ab_test_results`: A/B testing data
+
+## Development Guidelines
+
+### File Organization
+```
+/workflows/          # n8n workflow JSON files
+/custom/
+  /functions/       # Custom JavaScript functions
+  /nodes/          # TypeScript n8n nodes
+/scripts/          # Setup and utility scripts
+/data/            # Persistent data volumes
+/logs/            # Application logs
+```
+
+### Environment Variables
+- All credentials in `.env` file (see `.env.example`)
+- Queue mode enabled by default (`EXECUTIONS_MODE=queue`)
+- MCP proxy configuration required
+- Platform-specific API keys
+
+### Workflow Development
+1. Use Execute Workflow pattern for loose coupling
+2. Implement proper error handling with retry logic
+3. Add monitoring/logging at each step
+4. Use RabbitMQ for rate limiting
+5. Follow 6-point agent specification template
+
+### AI Integration
+- Cost-optimized routing via `aiRouter.js`
+- Fallback models for resilience
+- Platform-specific prompt templates
+- Google Sheets dynamic prompt management
+
+### Testing & Debugging
+- VS Code launch configuration available
+- Docker logs via Vector aggregation
+- n8n execution history for debugging
+- Test workflows before production
+
+### Security Considerations
+- Never commit credentials
+- Use environment variables
+- Implement rate limiting
+- Validate all external inputs
+- Monitor API costs
+
+## Common Tasks
+
+### Adding New Platform
+1. Update `promptLibrary.js` with platform templates
+2. Add platform in `ViralityPredictor` scoring
+3. Create formatter in `PublisherFormatter`
+4. Add credentials to `.env`
+
+### Modifying AI Models
+1. Update `aiRouter.js` with model config
+2. Add API integration in `ContentFactory`
+3. Update cost tracking in `model_performance`
+4. Test with sample content
+
+### Debugging Workflows
+1. Check n8n execution history
+2. Review Vector logs
+3. Inspect RabbitMQ queue
+4. Verify PostgreSQL data
+
+## Performance Optimization
+- Queue mode for high-volume processing
+- Concurrent execution limits
+- Smart caching in custom functions
+- Batch operations where possible
+
+## Monitoring
+- Daily analytics via `AnalyticsLoop`
+- Slack alerts for errors
+- Cost tracking per model/platform
+- A/B testing for optimization
+
+## Dependencies
+- n8n 1.19.0+
+- Node.js 18+
+- PostgreSQL 15+
+- RabbitMQ 3.12+
+- Redis 7+
+- Docker & Docker Compose
+
+## Support
+- GitHub Issues: https://github.com/grayghostdev/social_Media_automations
+- n8n Documentation: https://docs.n8n.io
+- MCP Spec: https://modelcontextprotocol.io

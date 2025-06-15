@@ -1,0 +1,368 @@
+{
+  "name": "PromptHubLoader",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 4
+            }
+          ]
+        }
+      },
+      "id": "1",
+      "name": "Cron Every 4 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {},
+      "id": "2",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [250, 400]
+    },
+    {
+      "parameters": {
+        "url": "={{$vars.MCP_PROXY_URL}}/healthz",
+        "method": "HEAD",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{$vars.MCP_PROXY_KEY}}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 3000
+        }
+      },
+      "id": "3",
+      "name": "Check MCP Health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [450, 350],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "sheetId": "={{$vars.SHEETS_ID}}",
+        "range": "Content_Prompts!A:H",
+        "options": {
+          "returnAllMatches": true,
+          "dataProperty": "content_prompts"
+        }
+      },
+      "id": "4",
+      "name": "Load Content Prompts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.2,
+      "position": [650, 200],
+      "credentials": {
+        "googleSheetsOAuth2": {
+          "id": "gsheets_cred",
+          "name": "Google Sheets Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "sheetId": "={{$vars.SHEETS_ID}}",
+        "range": "Hooks_Templates!A:F",
+        "options": {
+          "returnAllMatches": true,
+          "dataProperty": "hooks_templates"
+        }
+      },
+      "id": "5",
+      "name": "Load Hooks Templates",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.2,
+      "position": [650, 300],
+      "credentials": {
+        "googleSheetsOAuth2": {
+          "id": "gsheets_cred",
+          "name": "Google Sheets Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "sheetId": "={{$vars.SHEETS_ID}}",
+        "range": "Style_Guidelines!A:E",
+        "options": {
+          "returnAllMatches": true,
+          "dataProperty": "style_guidelines"
+        }
+      },
+      "id": "6",
+      "name": "Load Style Guidelines",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.2,
+      "position": [650, 400],
+      "credentials": {
+        "googleSheetsOAuth2": {
+          "id": "gsheets_cred",
+          "name": "Google Sheets Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "sheetId": "={{$vars.SHEETS_ID}}",
+        "range": "Compliance_Rules!A:D",
+        "options": {
+          "returnAllMatches": true,
+          "dataProperty": "compliance_rules"
+        }
+      },
+      "id": "7",
+      "name": "Load Compliance Rules",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.2,
+      "position": [650, 500],
+      "credentials": {
+        "googleSheetsOAuth2": {
+          "id": "gsheets_cred",
+          "name": "Google Sheets Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "sheetId": "={{$vars.SHEETS_ID}}",
+        "range": "Input_Templates!A:C",
+        "options": {
+          "returnAllMatches": true,
+          "dataProperty": "input_templates"
+        }
+      },
+      "id": "8",
+      "name": "Load Input Templates",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.2,
+      "position": [650, 600],
+      "credentials": {
+        "googleSheetsOAuth2": {
+          "id": "gsheets_cred",
+          "name": "Google Sheets Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Merge all prompt data into global cache\nconst contentPrompts = $items('Load Content Prompts');\nconst hooksTemplates = $items('Load Hooks Templates');\nconst styleGuidelines = $items('Load Style Guidelines');\nconst complianceRules = $items('Load Compliance Rules');\nconst inputTemplates = $items('Load Input Templates');\n\n// Initialize global prompts object\nglobal.prompts = {\n  Content_Prompts: [],\n  Hooks_Templates: [],\n  Style_Guidelines: [],\n  Compliance_Rules: [],\n  Input_Templates: [],\n  lastUpdated: new Date().toISOString(),\n  version: 1\n};\n\n// Helper to process sheet data\nfunction processSheetData(items, sheetName) {\n  if (!items || items.length === 0) return [];\n  \n  const data = [];\n  items.forEach(item => {\n    if (item.json && Object.keys(item.json).length > 0) {\n      // Skip header row if it exists\n      if (item.json.Platform !== 'Platform') {\n        data.push(item.json);\n      }\n    }\n  });\n  return data;\n}\n\n// Process each sheet\nglobal.prompts.Content_Prompts = processSheetData(contentPrompts, 'Content_Prompts');\nglobal.prompts.Hooks_Templates = processSheetData(hooksTemplates, 'Hooks_Templates');\nglobal.prompts.Style_Guidelines = processSheetData(styleGuidelines, 'Style_Guidelines');\nglobal.prompts.Compliance_Rules = processSheetData(complianceRules, 'Compliance_Rules');\nglobal.prompts.Input_Templates = processSheetData(inputTemplates, 'Input_Templates');\n\n// Calculate statistics\nconst stats = {\n  Content_Prompts: global.prompts.Content_Prompts.length,\n  Hooks_Templates: global.prompts.Hooks_Templates.length,\n  Style_Guidelines: global.prompts.Style_Guidelines.length,\n  Compliance_Rules: global.prompts.Compliance_Rules.length,\n  Input_Templates: global.prompts.Input_Templates.length,\n  total: 0\n};\n\nstats.total = Object.values(stats).reduce((sum, val) => sum + (typeof val === 'number' ? val : 0), 0);\n\n// Store in memory for quick access\nglobal.promptsLoadTime = Date.now();\n\n// Log results\nconsole.log('Prompt Hub loaded:', stats);\n\nreturn [{\n  json: {\n    status: 'success',\n    message: 'Prompt Hub loaded successfully',\n    stats: stats,\n    loadedAt: new Date().toISOString(),\n    mcpHealthy: $node['Check MCP Health'].statusCode === 200\n  }\n}];"
+      },
+      "id": "9",
+      "name": "Merge & Cache Prompts",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [850, 400]
+    },
+    {
+      "parameters": {
+        "url": "={{$vars.SLACK_WEBHOOK_URL}}",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParametersJson": "{\n  \"text\": \"🔄 Prompt Hub Cache Updated\",\n  \"blocks\": [\n    {\n      \"type\": \"section\",\n      \"text\": {\n        \"type\": \"mrkdwn\",\n        \"text\": \"*Prompt Hub Status:* {{$json.status}}\\n*Total Prompts:* {{$json.stats.total}}\\n*Last Updated:* {{$json.loadedAt}}\"\n      }\n    },\n    {\n      \"type\": \"section\",\n      \"fields\": [\n        {\n          \"type\": \"mrkdwn\",\n          \"text\": \"*Content:* {{$json.stats.Content_Prompts}}\"\n        },\n        {\n          \"type\": \"mrkdwn\",\n          \"text\": \"*Hooks:* {{$json.stats.Hooks_Templates}}\"\n        },\n        {\n          \"type\": \"mrkdwn\",\n          \"text\": \"*Styles:* {{$json.stats.Style_Guidelines}}\"\n        },\n        {\n          \"type\": \"mrkdwn\",\n          \"text\": \"*Compliance:* {{$json.stats.Compliance_Rules}}\"\n        }\n      ]\n    }\n  ]\n}"
+      },
+      "id": "10",
+      "name": "Notify Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1050, 400],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.stats.total === 0}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "11",
+      "name": "Check Load Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1050, 500]
+    },
+    {
+      "parameters": {
+        "message": "=⚠️ Prompt Hub loading failed - no prompts loaded from Google Sheets. Check SHEETS_ID and service account permissions.",
+        "additionalFields": {}
+      },
+      "id": "12",
+      "name": "Error Alert",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [1250, 600]
+    }
+  ],
+  "connections": {
+    "Cron Every 4 Hours": {
+      "main": [
+        [
+          {
+            "node": "Check MCP Health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Check MCP Health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check MCP Health": {
+      "main": [
+        [
+          {
+            "node": "Load Content Prompts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Load Hooks Templates",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Load Style Guidelines",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Load Compliance Rules",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Load Input Templates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Content Prompts": {
+      "main": [
+        [
+          {
+            "node": "Merge & Cache Prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Hooks Templates": {
+      "main": [
+        [
+          {
+            "node": "Merge & Cache Prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Style Guidelines": {
+      "main": [
+        [
+          {
+            "node": "Merge & Cache Prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Compliance Rules": {
+      "main": [
+        [
+          {
+            "node": "Merge & Cache Prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Input Templates": {
+      "main": [
+        [
+          {
+            "node": "Merge & Cache Prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge & Cache Prompts": {
+      "main": [
+        [
+          {
+            "node": "Notify Slack",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Check Load Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Load Success": {
+      "main": [
+        [
+          {
+            "node": "Error Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "prompthub-v1",
+  "id": "PromptHubLoader",
+  "meta": {
+    "instanceId": "8c8c5237b8e37b006a7adce87f4369350c58e41f3ca501d19b1e4d58e6ab5126"
+  },
+  "tags": ["utility", "cache", "prompts"]
+}
