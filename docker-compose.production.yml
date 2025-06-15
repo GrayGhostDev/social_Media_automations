@@ -41,6 +41,13 @@ services:
       - QUEUE_BULL_REDIS_HOST=redis
       - QUEUE_BULL_REDIS_PORT=6379
       - N8N_LOG_LEVEL=warn
+      - N8N_API_KEY=${N8N_API_KEY}
+      - N8N_USER=${N8N_USER}
+      - N8N_PASSWORD=${N8N_PASSWORD}
+      - WEBHOOK_URL=${N8N_WEBHOOK_URL}
+      - N8N_API_URL=${N8N_API_URL}
+      - N8N_BASE_URL=${N8N_BASE_URL}
+      - N8N_PROJECT_ID=${N8N_PROJECT_ID}
     volumes:
       - ./custom:/home/node/.n8n/custom
       - n8n_data:/home/node/.n8n

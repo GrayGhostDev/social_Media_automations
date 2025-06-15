@@ -33,11 +33,19 @@ docker compose up --build
 ```
 
 ## Key URLs
+
+### Self-Hosted
 - n8n Editor: http://localhost:5678
 - RabbitMQ Management: http://localhost:15672
 - PostgreSQL: localhost:5432
 - MCP Proxy: http://localhost:7990
 - MCP Proxy Health: http://localhost:7990/healthz
+
+### n8n Cloud
+- n8n Editor: https://grayghostdata.app.n8n.cloud
+- API Endpoint: https://grayghostdata.app.n8n.cloud/api/v1
+- Webhook Base: https://grayghostdata.app.n8n.cloud/webhook
+- Project ID: 57VsYz98WIBHUxJM
 
 ## Project Structure
 ```

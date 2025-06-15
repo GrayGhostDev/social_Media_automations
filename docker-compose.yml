@@ -25,6 +25,13 @@ services:
       - N8N_LOG_LEVEL=info
       - GENERIC_TIMEZONE=America/New_York
       - N8N_PERSONALIZATION_ENABLED=false
+      - N8N_API_KEY=${N8N_API_KEY}
+      - N8N_USER=${N8N_USER}
+      - N8N_PASSWORD=${N8N_PASSWORD}
+      - WEBHOOK_URL=${N8N_WEBHOOK_URL}
+      - N8N_API_URL=${N8N_API_URL}
+      - N8N_BASE_URL=${N8N_BASE_URL}
+      - N8N_PROJECT_ID=${N8N_PROJECT_ID}
     volumes:
       - ./custom:/home/node/.n8n/custom
       - ./workflows:/home/node/.n8n/workflows

@@ -13,11 +13,20 @@ An AI-powered n8n workflow system for discovering, regenerating, and publishing 
 
 ## Prerequisites
 
+### For Self-Hosted Deployment
 - Docker and Docker Compose
-- API Keys:
-  - OpenAI API key
-  - Anthropic API key
-  - Slack webhook URL (or other platform credentials)
+- PostgreSQL database
+- Redis (for queue mode)
+
+### For n8n Cloud Deployment
+- n8n cloud account (https://n8n.io/cloud/)
+- API access enabled
+
+### Required API Keys
+- OpenAI API key
+- Anthropic API key
+- Social media platform credentials
+- Additional AI service keys (Groq, Gemini, etc.)
 
 ## Quick Start
 
@@ -42,6 +51,30 @@ An AI-powered n8n workflow system for discovering, regenerating, and publishing 
    - Open http://localhost:5678
    - Import the workflow from `workflows/viral_content_workflow.json`
    - Activate the workflow
+
+## n8n Cloud Deployment
+
+For cloud deployment using n8n's hosted service:
+
+1. **Configure cloud credentials**
+   ```bash
+   # Add to .env file
+   N8N_API_KEY=your-api-key
+   N8N_WEBHOOK_URL=https://your-instance.app.n8n.cloud/webhook
+   N8N_API_URL=https://your-instance.app.n8n.cloud
+   ```
+
+2. **Import workflows to cloud**
+   ```bash
+   ./scripts/configure-n8n-cloud.sh
+   # Choose option 4 to import all workflows
+   ```
+
+3. **Configure variables in n8n UI**
+   - Go to Settings > Variables
+   - Add all API keys and configuration
+
+See [n8n Cloud Migration Guide](docs/n8n-cloud-migration.md) for detailed instructions.
 
 ## Architecture
 
