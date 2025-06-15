@@ -1,0 +1,35 @@
+{
+  "name": "social-media-automations",
+  "version": "1.0.0",
+  "description": "n8n social media automation with AI and MCP integration",
+  "scripts": {
+    "build:custom": "cd custom && tsc",
+    "test:nodes": "jest custom/nodes/**/*.test.js",
+    "lint": "eslint custom/**/*.js custom/**/*.ts",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:rebuild": "docker compose up --build -d",
+    "logs": "docker compose logs -f n8n",
+    "init:db": "docker compose exec postgres psql -U n8n_user -d n8n_db -f /scripts/init-database.sql",
+    "init:mcp": "docker compose exec proxy /scripts/n8n-mcp-onboard.sh"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/grayghostdev/social_Media_automations.git"
+  },
+  "keywords": [
+    "n8n",
+    "automation",
+    "social-media",
+    "ai",
+    "mcp"
+  ],
+  "author": "Gray Ghost Dev",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.0",
+    "jest": "^29.7.0",
+    "eslint": "^8.54.0"
+  }
+}

@@ -1,0 +1,131 @@
+# Vector Configuration for n8n Log Processing
+
+# Source: Docker container logs
+[sources.docker_logs]
+type = "docker_logs"
+docker_host = "unix:///var/run/docker.sock"
+include_containers = ["n8n", "n8n_worker", "n8n_mcp_proxy"]
+
+# Transform: Parse JSON logs
+[transforms.parse_logs]
+type = "remap"
+inputs = ["docker_logs"]
+source = '''
+# Parse JSON if possible
+.parsed = parse_json(.message) ?? {}
+
+# Extract common fields
+.container = .container_name
+.timestamp = .parsed.timestamp ?? .timestamp
+.level = .parsed.level ?? "info"
+.workflow_id = .parsed.workflowId ?? null
+.execution_id = .parsed.executionId ?? null
+.node_type = .parsed.nodeType ?? null
+.node_name = .parsed.nodeName ?? null
+
+# Extract cost and performance metrics
+.cost = .parsed.cost ?? null
+.tokens_used = .parsed.tokensUsed ?? null
+.latency_ms = .parsed.latencyMs ?? null
+.error = .parsed.error ?? null
+
+# Parse model information from AI nodes
+if contains(.message, "openai") || contains(.message, "anthropic") || contains(.message, "gemini") {
+  .model_used = .parsed.model ?? null
+  .prompt_tokens = .parsed.usage.prompt_tokens ?? null
+  .completion_tokens = .parsed.usage.completion_tokens ?? null
+  .total_tokens = .parsed.usage.total_tokens ?? null
+}
+
+# Calculate costs for OpenAI models
+if .model_used == "gpt-4" && .total_tokens != null {
+  .cost = (.prompt_tokens ?? 0) * 0.00003 + (.completion_tokens ?? 0) * 0.00006
+} else if .model_used == "gpt-3.5-turbo" && .total_tokens != null {
+  .cost = .total_tokens * 0.000001
+}
+
+# Remove original message to save space
+del(.message)
+del(.parsed)
+'''
+
+# Transform: Filter and enrich
+[transforms.filter_enrich]
+type = "filter"
+inputs = ["parse_logs"]
+condition = '''
+.level != "debug" || .cost != null || .error != null
+'''
+
+# Transform: Add metadata
+[transforms.add_metadata]
+type = "remap"
+inputs = ["filter_enrich"]
+source = '''
+.environment = "production"
+.instance_id = get_env_var!("HOSTNAME")
+.processed_at = now()
+'''
+
+# Sink: PostgreSQL for analytics
+[sinks.postgres_logs]
+type = "postgresql"
+inputs = ["add_metadata"]
+host = "${POSTGRES_HOST}"
+port = 5432
+user = "${POSTGRES_USER}"
+password = "${POSTGRES_PASSWORD}"
+database = "${POSTGRES_DB}"
+table = "n8n_logs"
+schema = '''
+CREATE TABLE IF NOT EXISTS n8n_logs (
+    id SERIAL PRIMARY KEY,
+    timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
+    container VARCHAR(100),
+    level VARCHAR(20),
+    workflow_id VARCHAR(255),
+    execution_id VARCHAR(255),
+    node_type VARCHAR(100),
+    node_name VARCHAR(255),
+    model_used VARCHAR(100),
+    tokens_used INTEGER,
+    cost DECIMAL(10, 6),
+    latency_ms INTEGER,
+    error TEXT,
+    prompt_tokens INTEGER,
+    completion_tokens INTEGER,
+    total_tokens INTEGER,
+    environment VARCHAR(50),
+    instance_id VARCHAR(100),
+    processed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    raw_data JSONB,
+    INDEX idx_timestamp (timestamp DESC),
+    INDEX idx_workflow_id (workflow_id),
+    INDEX idx_execution_id (execution_id),
+    INDEX idx_model_used (model_used),
+    INDEX idx_cost (cost)
+);
+'''
+
+# Sink: File backup for debugging
+[sinks.file_backup]
+type = "file"
+inputs = ["parse_logs"]
+path = "/var/log/vector/n8n-logs.json"
+encoding.codec = "ndjson"
+encoding.timestamp_format = "rfc3339"
+
+# Buffer configuration for reliability
+[sinks.postgres_logs.buffer]
+type = "disk"
+max_size = 268435488  # 256MB
+when_full = "block"
+
+[sinks.postgres_logs.batch]
+max_bytes = 1048576  # 1MB
+timeout_secs = 10
+
+[sinks.postgres_logs.request]
+retry_attempts = 5
+retry_initial_backoff_secs = 1
+retry_max_duration_secs = 30

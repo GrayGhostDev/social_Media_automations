@@ -20,7 +20,7 @@ COPY --chown=node:node scripts/init-database.sql /home/node/scripts/
 ENV N8N_CUSTOM_EXTENSIONS="/home/node/.n8n/custom"
 
 # Install global npm packages for AI and analytics
-RUN npm install -g openai anthropic axios lodash moment @tensorflow/tfjs @google-cloud/analytics-data
+RUN npm install -g openai anthropic axios lodash moment @tensorflow/tfjs-node @google-cloud/analytics-data
 
 # Set working directory
 WORKDIR /home/node

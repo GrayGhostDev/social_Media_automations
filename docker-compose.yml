@@ -18,9 +18,13 @@ services:
       - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
       - N8N_CUSTOM_EXTENSIONS=/home/node/.n8n/custom
       - NODE_FUNCTION_ALLOW_EXTERNAL=${ALLOWED_MODULES}
-      - EXECUTIONS_PROCESS=main
+      - EXECUTIONS_PROCESS=${EXECUTIONS_PROCESS:-main}
+      - EXECUTIONS_MODE=${EXECUTIONS_MODE:-regular}
+      - QUEUE_BULL_REDIS_HOST=redis
+      - QUEUE_BULL_REDIS_PORT=6379
       - N8N_LOG_LEVEL=info
       - GENERIC_TIMEZONE=America/New_York
+      - N8N_PERSONALIZATION_ENABLED=false
     volumes:
       - ./custom:/home/node/.n8n/custom
       - ./workflows:/home/node/.n8n/workflows
@@ -29,6 +33,7 @@ services:
       - postgres
       - rabbitmq
       - proxy
+      - redis
     restart: unless-stopped
     networks:
       - n8n-network
@@ -96,6 +101,41 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  redis:
+    image: redis:7-alpine
+    container_name: n8n_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./data/redis:/data
+    networks:
+      - n8n-network
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  vector:
+    image: timberio/vector:0.34.0-alpine
+    container_name: n8n_vector
+    volumes:
+      - ./vector.toml:/etc/vector/vector.toml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    networks:
+      - n8n-network
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    user: root
 
 volumes:
   n8n_data:
