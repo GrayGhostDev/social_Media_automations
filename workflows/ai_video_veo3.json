@@ -1,0 +1,540 @@
+{
+  "name": "AI-Video via Veo 3",
+  "nodes": [
+    {
+      "id": "100",
+      "name": "AI Router",
+      "type": "n8n-nodes-base.function",
+      "parameters": {
+        "functionCode": "const aiRouter = require('/home/node/.n8n/custom/functions/aiRouter.js');\n\n// Determine content type and complexity\nconst contentType = $json.content_type || 'general';\nconst platform = $json.platform || 'general';\nconst wordCount = $json.idea ? $json.idea.split(' ').length : 50;\n\n// Route to appropriate model\nconst routing = aiRouter.route($json.idea || $json.content, {\n  content_type: contentType,\n  platform: platform,\n  complexity: $json.complexity || 'medium',\n  word_count: wordCount,\n  max_cost: 0.10,\n  preferred_model: $json.preferred_model\n});\n\nreturn [{\n  json: {\n    ...$json,\n    model: routing.model,\n    model_config: routing.config,\n    fallback_models: routing.fallback_models,\n    estimated_cost: routing.estimated_cost,\n    routing_reason: routing.reasoning\n  }\n}];"
+      },
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "id": "101",
+      "name": "Generate Script",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.3,
+      "parameters": {
+        "resource": "chat",
+        "model": "={{ $json.model }}",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a viral short-form video scriptwriter. Create engaging scripts that hook viewers in the first 3 seconds, build tension, and deliver satisfying payoffs. Include specific visual cues in [brackets] and timing markers."
+            },
+            {
+              "role": "user",
+              "content": "Platform: {{ $json.platform }}\nTopic: {{ $json.idea }}\n\nCreate a {{ $json.platform === 'tiktok' ? '15-30' : '30-60' }} second video script. Include:\n- Strong hook (first 3 seconds)\n- Visual descriptions\n- On-screen text cues\n- Trending audio suggestions\n- Clear CTA"
+            }
+          ]
+        },
+        "options": {
+          "temperature": "={{ $json.model_config.temperature }}",
+          "maxTokens": "={{ $json.model_config.max_tokens }}",
+          "topP": "={{ $json.model_config.top_p }}"
+        }
+      },
+      "position": [450, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai_cred",
+          "name": "OpenAI Account"
+        }
+      }
+    },
+    {
+      "id": "101b",
+      "name": "Generate Script (Claude)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "parameters": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "x-api-key",
+              "value": "={{$vars.CLAUDE_KEY}}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersJson": "{\n  \"model\": \"{{ $json.model }}\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"You are a master storyteller creating viral video scripts. Platform: {{ $json.platform }}\\n\\nCreate a compelling {{ $json.platform === 'tiktok' ? '15-30' : '30-60' }} second video script about: {{ $json.idea }}\\n\\nRequirements:\\n- Hook viewers in first 2 seconds\\n- Build emotional connection\\n- Include [visual cues] and (audio notes)\\n- End with unexpected twist or satisfying conclusion\\n- Suggest trending sounds/music\"\n    }\n  ],\n  \"max_tokens\": {{ $json.model_config.max_tokens }},\n  \"temperature\": {{ $json.model_config.temperature }}\n}"
+      },
+      "position": [450, 400],
+      "continueOnFail": true
+    },
+    {
+      "id": "102",
+      "name": "Revid.ai Pattern Booster",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "parameters": {
+        "url": "https://api.revid.ai/v1/boost",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{$vars.REVID_KEY}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "script",
+              "value": "={{ $json.choices ? $json.choices[0].message.content : $json.content[0].text }}"
+            },
+            {
+              "name": "platform",
+              "value": "={{ $json.platform }}"
+            },
+            {
+              "name": "boost_type",
+              "value": "viral_hooks"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "position": [650, 350],
+      "continueOnFail": true
+    },
+    {
+      "id": "103",
+      "name": "Script Router",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "parameters": {
+        "functionCode": "// Merge scripts from different sources and select best\nconst openAIScript = $node['Generate Script'].json?.choices?.[0]?.message?.content || null;\nconst claudeScript = $node['Generate Script (Claude)'].json?.content?.[0]?.text || null;\nconst revidBoost = $node['Revid.ai Pattern Booster'].json?.boosted_script || null;\n\n// Select the best script\nlet finalScript = revidBoost || openAIScript || claudeScript;\n\nif (!finalScript) {\n  throw new Error('No script generated from any source');\n}\n\n// Parse script for Veo 3 format\nconst scriptParts = finalScript.split(/\\n+/);\nconst visualCues = [];\nconst audioNotes = [];\nlet cleanScript = '';\n\nscriptParts.forEach(line => {\n  // Extract visual cues [like this]\n  const visualMatches = line.match(/\\[([^\\]]+)\\]/g);\n  if (visualMatches) {\n    visualMatches.forEach(match => {\n      visualCues.push(match.slice(1, -1));\n    });\n  }\n  \n  // Extract audio notes (like this)\n  const audioMatches = line.match(/\\(([^\\)]+)\\)/g);\n  if (audioMatches) {\n    audioMatches.forEach(match => {\n      if (match.includes('audio') || match.includes('music') || match.includes('sound')) {\n        audioNotes.push(match.slice(1, -1));\n      }\n    });\n  }\n  \n  // Clean script text\n  cleanScript += line.replace(/\\[([^\\]]+)\\]/g, '').replace(/\\(([^\\)]+)\\)/g, '').trim() + ' ';\n});\n\nreturn [{\n  json: {\n    ...$json,\n    final_script: finalScript,\n    veo3_script: cleanScript.trim(),\n    visual_cues: visualCues,\n    audio_notes: audioNotes,\n    script_source: revidBoost ? 'revid_boosted' : (openAIScript ? 'openai' : 'claude')\n  }\n}];"
+      },
+      "position": [850, 350]
+    },
+    {
+      "id": "104",
+      "name": "Generate Thumbnail",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.3,
+      "parameters": {
+        "resource": "image",
+        "operation": "generate",
+        "modelId": "dall-e-3",
+        "prompt": "=Create a viral {{ $json.platform }} video thumbnail for: {{ $json.veo3_script.substring(0, 100) }}... Style: eye-catching, high contrast, {{ $json.platform === 'youtube' ? 'clickbait-style with large text overlay' : 'trendy and aesthetic' }}",
+        "options": {
+          "size": "1024x1024",
+          "quality": "standard",
+          "style": "vivid"
+        }
+      },
+      "position": [1050, 250],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai_cred",
+          "name": "OpenAI Account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "104b",
+      "name": "Generate Thumbnail (MJ)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "parameters": {
+        "url": "https://api.midjourney.com/v1/imagine",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{$vars.MJ_TOKEN}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "prompt",
+              "value": "=viral {{ $json.platform }} thumbnail, {{ $json.visual_cues[0] || 'trending' }}, cinematic lighting, high quality, --ar {{ $json.platform === 'tiktok' ? '9:16' : '16:9' }} --v 6"
+            }
+          ]
+        }
+      },
+      "position": [1050, 350],
+      "continueOnFail": true
+    },
+    {
+      "id": "105",
+      "name": "Veo 3 Video Generator",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "parameters": {
+        "url": "{{$vars.VEO3_URL}}/v1/generate",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{$vars.VEO3_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersJson": "{\n  \"script\": \"{{ $json.veo3_script }}\",\n  \"visual_style\": \"{{ $json.platform === 'tiktok' ? 'trendy' : 'cinematic' }}\",\n  \"duration\": {{ $json.platform === 'tiktok' ? 15 : 30 }},\n  \"aspect_ratio\": \"9:16\",\n  \"quality\": \"high\",\n  \"visual_cues\": {{ JSON.stringify($json.visual_cues) }},\n  \"thumbnail_url\": \"{{ $node['Generate Thumbnail'].json?.image_url || $node['Generate Thumbnail (MJ)'].json?.url || '' }}\",\n  \"audio_style\": \"{{ $json.audio_notes[0] || 'trending' }}\"\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "position": [1250, 300]
+    },
+    {
+      "id": "106",
+      "name": "Poll Veo Status",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "parameters": {
+        "resume": "webhook",
+        "options": {
+          "httpMethod": "GET",
+          "responseData": "allEntries"
+        }
+      },
+      "position": [1450, 300],
+      "webhookId": "veo-status-webhook"
+    },
+    {
+      "id": "107",
+      "name": "Check Video Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "parameters": {
+        "url": "={{$vars.VEO3_URL}}/v1/status/{{ $json.job_id }}",
+        "method": "GET",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{$vars.VEO3_KEY}}"
+            }
+          ]
+        }
+      },
+      "position": [1650, 300]
+    },
+    {
+      "id": "108",
+      "name": "Status Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.status }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "completed",
+              "output": 0
+            },
+            {
+              "value2": "processing",
+              "output": 1
+            },
+            {
+              "value2": "failed",
+              "output": 2
+            }
+          ]
+        },
+        "fallbackOutput": 2
+      },
+      "position": [1850, 300]
+    },
+    {
+      "id": "109",
+      "name": "Download Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "parameters": {
+        "url": "={{ $json.video_url }}",
+        "method": "GET",
+        "responseFormat": "file",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false,
+              "responseFormat": "file"
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "position": [2050, 200]
+    },
+    {
+      "id": "110",
+      "name": "Wait 15s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "parameters": {
+        "amount": 15,
+        "unit": "seconds"
+      },
+      "position": [2050, 300]
+    },
+    {
+      "id": "111",
+      "name": "Fallback to Runway",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "parameters": {
+        "url": "{{$vars.RUNWAY_URL}}/v1/generate",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{$vars.RUNWAY_API_KEY}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "text_prompt",
+              "value": "={{ $json.veo3_script }}"
+            },
+            {
+              "name": "model",
+              "value": "gen3"
+            }
+          ]
+        }
+      },
+      "position": [2050, 400],
+      "continueOnFail": true
+    },
+    {
+      "id": "112",
+      "name": "Compile Output",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "parameters": {
+        "functionCode": "// Compile all outputs\nconst video = $node['Download Video'].binary?.data || $node['Fallback to Runway'].binary?.data;\nconst script = items[0].json.final_script;\nconst thumbnail = $node['Generate Thumbnail'].json?.image_url || $node['Generate Thumbnail (MJ)'].json?.url;\n\nif (!video) {\n  throw new Error('Video generation failed from all sources');\n}\n\nreturn [{\n  json: {\n    ...items[0].json,\n    video_ready: true,\n    outputs: {\n      script: script,\n      clean_script: items[0].json.veo3_script,\n      visual_cues: items[0].json.visual_cues,\n      audio_notes: items[0].json.audio_notes,\n      thumbnail_url: thumbnail,\n      video_source: $node['Download Video'].binary ? 'veo3' : 'runway',\n      generation_cost: items[0].json.estimated_cost + 0.10 // Add video generation cost\n    }\n  },\n  binary: {\n    video: video\n  }\n}];"
+      },
+      "position": [2250, 300]
+    }
+  ],
+  "connections": {
+    "AI Router": {
+      "main": [
+        [
+          {
+            "node": "Generate Script",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Generate Script (Claude)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Script": {
+      "main": [
+        [
+          {
+            "node": "Revid.ai Pattern Booster",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Script (Claude)": {
+      "main": [
+        [
+          {
+            "node": "Revid.ai Pattern Booster",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Revid.ai Pattern Booster": {
+      "main": [
+        [
+          {
+            "node": "Script Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Script Router": {
+      "main": [
+        [
+          {
+            "node": "Generate Thumbnail",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Generate Thumbnail (MJ)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Thumbnail": {
+      "main": [
+        [
+          {
+            "node": "Veo 3 Video Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Thumbnail (MJ)": {
+      "main": [
+        [
+          {
+            "node": "Veo 3 Video Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Veo 3 Video Generator": {
+      "main": [
+        [
+          {
+            "node": "Poll Veo Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll Veo Status": {
+      "main": [
+        [
+          {
+            "node": "Check Video Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Video Status": {
+      "main": [
+        [
+          {
+            "node": "Status Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status Router": {
+      "main": [
+        [
+          {
+            "node": "Download Video",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 15s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fallback to Runway",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 15s": {
+      "main": [
+        [
+          {
+            "node": "Check Video Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Video": {
+      "main": [
+        [
+          {
+            "node": "Compile Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fallback to Runway": {
+      "main": [
+        [
+          {
+            "node": "Compile Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "ai-video-v1",
+  "id": "AIVideoVeo3",
+  "meta": {
+    "instanceId": "8c8c5237b8e37b006a7adce87f4369350c58e41f3ca501d19b1e4d58e6ab5126"
+  },
+  "tags": ["video", "ai", "generation"]
+}

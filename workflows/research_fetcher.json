@@ -1,0 +1,178 @@
+{
+  "name": "Research Fetcher",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "1",
+      "name": "Start",
+      "type": "n8n-nodes-base.start",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Get research prompts from global cache\nconst promptSelector = require('/home/node/.n8n/custom/functions/promptSelector.js');\nconst prompts = global.prompts || {};\n\n// Extract research parameters\nconst researchType = items[0].json.research_type || 'Trending_Topics';\nconst platform = items[0].json.platform || 'all';\nconst variables = {\n  INDUSTRY: items[0].json.industry || 'technology',\n  NICHE: items[0].json.niche || 'AI',\n  TOPIC: items[0].json.topic || 'artificial intelligence',\n  GEO: process.env.TRENDS_GEO || 'US',\n  COMPETITOR: items[0].json.competitor || '',\n  QUERY: items[0].json.query || items[0].json.topic,\n  MACROCOSMOS_KEY: process.env.MACROCOSMOS_KEY,\n  RITETAG_KEY: process.env.RITETAG_KEY,\n  BUZZSUMO_KEY: process.env.BUZZSUMO_KEY,\n  SERPAPI_KEY: process.env.SERPAPI_KEY,\n  PPLX_KEY: process.env.PPLX_KEY\n};\n\n// Get appropriate research prompt\nlet researchConfig;\ntry {\n  researchConfig = promptSelector.select('Research_Prompts', platform, researchType, {\n    prompts,\n    variables\n  });\n} catch (error) {\n  // Fallback configuration\n  researchConfig = {\n    researchType: 'general',\n    query: `trending ${variables.TOPIC} content`,\n    endpoint: 'https://www.google.com/search',\n    headers: {},\n    updateFrequency: 'daily',\n    priority: 'medium'\n  };\n}\n\n// Check if we should fetch based on update frequency\nconst lastFetch = items[0].json.last_research_fetch || 0;\nconst now = Date.now();\nconst frequencyMap = {\n  'hourly': 60 * 60 * 1000,\n  '6_hours': 6 * 60 * 60 * 1000,\n  '12_hours': 12 * 60 * 60 * 1000,\n  'daily': 24 * 60 * 60 * 1000,\n  'weekly': 7 * 24 * 60 * 60 * 1000\n};\nconst updateInterval = frequencyMap[researchConfig.updateFrequency] || frequencyMap.daily;\nconst shouldFetch = (now - lastFetch) > updateInterval;\n\nreturn [{\n  json: {\n    ...items[0].json,\n    research_config: researchConfig,\n    should_fetch: shouldFetch,\n    last_fetch_age_hours: Math.round((now - lastFetch) / (60 * 60 * 1000)),\n    variables\n  }\n}];"
+      },
+      "id": "2",
+      "name": "Prepare Research",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.should_fetch}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "3",
+      "name": "Should Fetch?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{$json.research_config.endpoint}}",
+        "method": "GET",
+        "sendHeaders": true,
+        "headerParametersJson": "={{ JSON.stringify($json.research_config.headers) }}",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": true,
+              "maxRedirects": 5
+            }
+          }
+        }
+      },
+      "id": "4",
+      "name": "Fetch Research Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [850, 200],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "functionCode": "// Use cached data\nconst cacheKey = `research_${items[0].json.research_config.researchType}_${items[0].json.platform}`;\nconst cachedData = global[cacheKey] || null;\n\nif (cachedData) {\n  return [{\n    json: {\n      ...items[0].json,\n      research_data: cachedData,\n      data_source: 'cache',\n      cache_age_hours: items[0].json.last_fetch_age_hours\n    }\n  }];\n} else {\n  // No cache available, return with flag\n  return [{\n    json: {\n      ...items[0].json,\n      research_data: null,\n      data_source: 'none',\n      error: 'No cached data available and fetch skipped due to rate limit'\n    }\n  }];\n}"
+      },
+      "id": "5",
+      "name": "Use Cached Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [850, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Process and normalize research data\nconst researchConfig = items[0].json.research_config;\nconst rawData = $node['Fetch Research Data'].json;\nconst error = $node['Fetch Research Data'].error;\n\nlet processedData = {};\nlet trends = [];\nlet keywords = [];\nlet insights = [];\n\n// Handle errors\nif (error) {\n  return [{\n    json: {\n      ...items[0].json,\n      research_data: null,\n      data_source: 'error',\n      error: error.message || 'Failed to fetch research data',\n      should_retry: true\n    }\n  }];\n}\n\n// Process based on research type\ntry {\n  switch (researchConfig.researchType) {\n    case 'Trending_Topics':\n      // Macrocosmos format\n      if (rawData.results) {\n        trends = rawData.results.map(r => ({\n          topic: r.title || r.topic,\n          score: r.score || r.engagement_score || 0,\n          source: r.source || 'macrocosmos',\n          url: r.url\n        }));\n      }\n      break;\n      \n    case 'Hashtags':\n      // RiteTag format\n      if (rawData.data) {\n        keywords = rawData.data.map(tag => ({\n          tag: tag.hashtag,\n          tweets_per_hour: tag.tweets || 0,\n          exposure: tag.exposure || 0,\n          color: tag.color // hot, warm, cold\n        }));\n      }\n      break;\n      \n    case 'Competitors':\n      // BuzzSumo format\n      if (rawData.articles) {\n        insights = rawData.articles.map(a => ({\n          title: a.title,\n          shares: a.total_shares || 0,\n          engagement: a.total_engagement || 0,\n          url: a.url,\n          published: a.published_date\n        }));\n      }\n      break;\n      \n    case 'Keywords':\n      // SerpAPI format\n      if (rawData.related_searches) {\n        keywords = rawData.related_searches.map(s => ({\n          keyword: s.query,\n          relevance: s.relevance_score || 0.5\n        }));\n      }\n      break;\n      \n    case 'Industry_News':\n      // Perplexity format\n      if (rawData.answer) {\n        insights = [{\n          summary: rawData.answer,\n          sources: rawData.sources || [],\n          confidence: rawData.confidence || 0.8\n        }];\n      }\n      break;\n  }\n  \n  // Compile processed data\n  processedData = {\n    trends: trends.slice(0, 10), // Top 10\n    keywords: keywords.slice(0, 20), // Top 20\n    insights: insights.slice(0, 5), // Top 5\n    raw_response: rawData,\n    fetched_at: new Date().toISOString(),\n    research_type: researchConfig.researchType\n  };\n  \n  // Cache the data globally\n  const cacheKey = `research_${researchConfig.researchType}_${items[0].json.platform}`;\n  global[cacheKey] = processedData;\n  \n} catch (parseError) {\n  console.error('Error processing research data:', parseError);\n  processedData = {\n    error: 'Failed to parse research data',\n    raw_response: rawData\n  };\n}\n\nreturn [{\n  json: {\n    ...items[0].json,\n    research_data: processedData,\n    data_source: 'fresh',\n    last_research_fetch: Date.now()\n  }\n}];"
+      },
+      "id": "6",
+      "name": "Process Research Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1050, 200]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Merge research data from both paths\nconst allItems = [...$items('Process Research Data'), ...$items('Use Cached Data')];\n\n// Find the item with actual data\nconst itemWithData = allItems.find(item => item.json.research_data && !item.json.error) || allItems[0];\n\n// Enrich original idea with research\nconst enrichedIdea = {\n  ...itemWithData.json,\n  research_enriched: true,\n  enrichment_summary: this.summarizeResearch(itemWithData.json.research_data)\n};\n\nfunction summarizeResearch(data) {\n  if (!data) return 'No research data available';\n  \n  const summary = [];\n  \n  if (data.trends && data.trends.length > 0) {\n    summary.push(`Top trends: ${data.trends.slice(0, 3).map(t => t.topic).join(', ')}`);\n  }\n  \n  if (data.keywords && data.keywords.length > 0) {\n    summary.push(`Key terms: ${data.keywords.slice(0, 5).map(k => k.tag || k.keyword).join(', ')}`);\n  }\n  \n  if (data.insights && data.insights.length > 0) {\n    summary.push(`${data.insights.length} insights discovered`);\n  }\n  \n  return summary.join('. ') || 'Research completed';\n}\n\nreturn [enrichedIdea];"
+      },
+      "id": "7",
+      "name": "Merge & Enrich",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Prepare Research",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Research": {
+      "main": [
+        [
+          {
+            "node": "Should Fetch?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Fetch?": {
+      "main": [
+        [
+          {
+            "node": "Fetch Research Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Use Cached Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Research Data": {
+      "main": [
+        [
+          {
+            "node": "Process Research Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Research Data": {
+      "main": [
+        [
+          {
+            "node": "Merge & Enrich",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use Cached Data": {
+      "main": [
+        [
+          {
+            "node": "Merge & Enrich",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "research-v1",
+  "id": "ResearchFetcher",
+  "meta": {
+    "instanceId": "8c8c5237b8e37b006a7adce87f4369350c58e41f3ca501d19b1e4d58e6ab5126"
+  },
+  "tags": ["research", "api", "subworkflow"]
+}

@@ -1,0 +1,337 @@
+{
+  "name": "Content QC Suite",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "1",
+      "name": "Start",
+      "type": "n8n-nodes-base.start",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "content",
+              "name": "content",
+              "value": "={{ $json.generated_content }}",
+              "type": "string"
+            },
+            {
+              "id": "platform",
+              "name": "platform",
+              "value": "={{ $json.platform }}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "2",
+      "name": "Extract Content",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "resource": "moderation",
+        "operation": "create",
+        "input": "={{ $json.content }}",
+        "options": {}
+      },
+      "id": "3",
+      "name": "OpenAI Moderation",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.3,
+      "position": [650, 200],
+      "credentials": {
+        "openAiApi": {
+          "id": "openai_cred",
+          "name": "OpenAI Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "x-api-key",
+              "value": "={{$vars.CLAUDE_KEY}}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersJson": "{\n  \"model\": \"claude-3-haiku-20240307\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a brand safety expert. Check content for: 1) Brand voice consistency, 2) Factual accuracy, 3) Compliance with platform policies, 4) Sentiment appropriateness. Return JSON with scores 0-1 for each category and overall pass/fail.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Platform: {{$json.platform}}\\n\\nContent: {{$json.content}}\"\n    }\n  ],\n  \"max_tokens\": 500,\n  \"temperature\": 0.1\n}",
+        "options": {}
+      },
+      "id": "4",
+      "name": "Claude Brand Safety",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.copyscape.com/v2/",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "u",
+              "value": "={{$vars.COPYSCAPE_USER}}"
+            },
+            {
+              "name": "k",
+              "value": "={{$vars.COPYSCAPE_KEY}}"
+            },
+            {
+              "name": "o",
+              "value": "csearch"
+            },
+            {
+              "name": "t",
+              "value": "={{ encodeURIComponent($json.content) }}"
+            },
+            {
+              "name": "e",
+              "value": "UTF-8"
+            }
+          ]
+        }
+      },
+      "id": "5",
+      "name": "Plagiarism Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [650, 400],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "{{$vars.PPLX_URL}}/v1/answer",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{$vars.PPLX_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParametersJson": "{\n  \"model\": \"sonar-small-chat\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are a fact-checker. Verify any claims, statistics, or statements in the content. Return JSON with fact_check_score (0-1) and any corrections needed.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Fact-check this content: {{$json.content}}\"\n    }\n  ],\n  \"temperature\": 0.1,\n  \"max_tokens\": 500\n}"
+      },
+      "id": "6",
+      "name": "Fact Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [650, 500]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Aggregate all QC results\nconst moderation = $node['OpenAI Moderation'].json;\nconst brandSafety = JSON.parse($node['Claude Brand Safety'].json.content[0].text);\nconst plagiarism = $node['Plagiarism Check'].json || { result: { count: 0 } };\nconst factCheck = JSON.parse($node['Fact Check'].json.choices[0].message.content);\n\n// Calculate overall QC score\nlet qcScore = 0;\nlet issues = [];\nlet passed = true;\n\n// OpenAI Moderation (weight: 30%)\nif (!moderation.flagged) {\n  qcScore += 0.3;\n} else {\n  passed = false;\n  issues.push('Content flagged by OpenAI moderation');\n}\n\n// Brand Safety (weight: 30%)\nif (brandSafety.overall_score >= 0.7) {\n  qcScore += 0.3 * brandSafety.overall_score;\n} else {\n  passed = false;\n  issues.push(`Brand safety score too low: ${brandSafety.overall_score}`);\n}\n\n// Plagiarism (weight: 20%)\nif (plagiarism.result && plagiarism.result.count === 0) {\n  qcScore += 0.2;\n} else if (plagiarism.result && plagiarism.result.count > 0) {\n  passed = false;\n  issues.push(`Plagiarism detected: ${plagiarism.result.count} matches`);\n}\n\n// Fact Check (weight: 20%)\nif (factCheck.fact_check_score >= 0.8) {\n  qcScore += 0.2 * factCheck.fact_check_score;\n} else {\n  issues.push(`Fact check concerns: ${factCheck.corrections || 'Review needed'}`);\n}\n\n// Platform-specific checks\nconst platform = items[0].json.platform;\nif (platform === 'linkedin' && brandSafety.sentiment && brandSafety.sentiment.professional < 0.6) {\n  issues.push('Content not professional enough for LinkedIn');\n  qcScore *= 0.8;\n}\n\nif (platform === 'tiktok' && items[0].json.content.length > 150) {\n  issues.push('Caption too long for TikTok (>150 chars)');\n}\n\nreturn [{\n  json: {\n    ...items[0].json,\n    qc_results: {\n      passed: passed && qcScore >= 0.7,\n      overall_score: Math.round(qcScore * 100) / 100,\n      issues: issues,\n      details: {\n        moderation: moderation,\n        brand_safety: brandSafety,\n        plagiarism_matches: plagiarism.result ? plagiarism.result.count : 0,\n        fact_check: factCheck\n      },\n      timestamp: new Date().toISOString()\n    }\n  }\n}];"
+      },
+      "id": "7",
+      "name": "Aggregate Results",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [900, 350]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.qc_results.passed}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "8",
+      "name": "QC Passed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1100, 350]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "status",
+              "value": "approved"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9",
+      "name": "Mark Approved",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [1300, 250]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Generate improvement suggestions based on QC issues\nconst qcResults = items[0].json.qc_results;\nconst suggestions = [];\n\nqcResults.issues.forEach(issue => {\n  if (issue.includes('Brand safety')) {\n    suggestions.push('Adjust tone to better match brand voice');\n  }\n  if (issue.includes('Plagiarism')) {\n    suggestions.push('Rewrite content to be more original');\n  }\n  if (issue.includes('Fact check')) {\n    suggestions.push('Verify statistics and claims with reliable sources');\n  }\n  if (issue.includes('too long')) {\n    suggestions.push('Shorten content to meet platform limits');\n  }\n  if (issue.includes('professional')) {\n    suggestions.push('Use more formal language and industry terms');\n  }\n});\n\nreturn [{\n  json: {\n    ...items[0].json,\n    status: 'needs_revision',\n    improvement_suggestions: suggestions,\n    retry_with_model: 'claude-sonnet-4' // Suggest better model for revision\n  }\n}];"
+      },
+      "id": "10",
+      "name": "Generate Improvements",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1300, 450]
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Extract Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Content": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Moderation",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Claude Brand Safety",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Plagiarism Check",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fact Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Moderation": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Brand Safety": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plagiarism Check": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fact Check": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Results": {
+      "main": [
+        [
+          {
+            "node": "QC Passed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "QC Passed?": {
+      "main": [
+        [
+          {
+            "node": "Mark Approved",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate Improvements",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "qc-suite-v1",
+  "id": "ContentQCSuite",
+  "meta": {
+    "instanceId": "8c8c5237b8e37b006a7adce87f4369350c58e41f3ca501d19b1e4d58e6ab5126"
+  },
+  "tags": ["quality", "moderation", "subworkflow"]
+}

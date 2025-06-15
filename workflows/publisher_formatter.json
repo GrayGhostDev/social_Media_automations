@@ -1,0 +1,173 @@
+{
+  "name": "Publisher Formatter",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "1",
+      "name": "Start",
+      "type": "n8n-nodes-base.start",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Get publishing prompts from cache and select appropriate format\nconst promptSelector = require('/home/node/.n8n/custom/functions/promptSelector.js');\nconst prompts = global.prompts || {};\n\n// Extract parameters\nconst platform = items[0].json.platform || 'twitter';\nconst content = items[0].json.generated_content || items[0].json.content || '';\nconst mediaUrl = items[0].json.media_url || null;\nconst videoUrl = items[0].json.video_url || null;\nconst hashtags = items[0].json.hashtags || [];\n\n// Variables for template replacement\nconst variables = {\n  CONTENT: content,\n  CAPTION: content.substring(0, 150),\n  HOOK: content.split('.')[0] || content.substring(0, 50),\n  HASHTAGS: hashtags.map(tag => tag.startsWith('#') ? tag : `#${tag}`).join(' '),\n  CTA: items[0].json.cta || 'What do you think?',\n  QUESTION: items[0].json.question || 'Share your thoughts below!',\n  TITLE: items[0].json.title || content.substring(0, 100),\n  DESCRIPTION: items[0].json.description || content,\n  HEADLINE: items[0].json.headline || content.split('.')[0],\n  INDUSTRY: items[0].json.industry || 'business',\n  NICHE: items[0].json.niche || 'general'\n};\n\n// Get publishing format\nlet publishConfig;\ntry {\n  publishConfig = promptSelector.select('Publishing_Prompts', platform, 'post', {\n    prompts,\n    variables\n  });\n} catch (error) {\n  // Fallback format\n  publishConfig = {\n    platform: platform,\n    formatTemplate: '{CONTENT}',\n    mediaRequirements: [],\n    qualityChecks: ['length_check'],\n    platformLimits: {}\n  };\n}\n\n// Apply platform limits\nlet formattedContent = publishConfig.formatTemplate || content;\n\n// Check character limits\nif (publishConfig.platformLimits.caption) {\n  const limit = publishConfig.platformLimits.caption.value;\n  if (formattedContent.length > limit) {\n    formattedContent = formattedContent.substring(0, limit - 3) + '...';\n  }\n}\n\nreturn [{\n  json: {\n    ...items[0].json,\n    publish_config: publishConfig,\n    formatted_content: formattedContent,\n    media_requirements: publishConfig.mediaRequirements,\n    quality_checks: publishConfig.qualityChecks,\n    needs_media: publishConfig.mediaRequirements.length > 0 && !mediaUrl && !videoUrl\n  }\n}];"
+      },
+      "id": "2",
+      "name": "Get Format Template",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Run quality checks based on platform requirements\nconst platform = items[0].json.platform;\nconst content = items[0].json.formatted_content;\nconst checks = items[0].json.quality_checks || [];\nconst limits = items[0].json.publish_config.platformLimits || {};\n\nconst issues = [];\nlet score = 100;\n\n// Platform-specific checks\nchecks.forEach(check => {\n  switch (check) {\n    case 'hook_in_3s':\n      // Check if first sentence is compelling\n      const firstSentence = content.split('.')[0];\n      if (firstSentence.length > 50) {\n        issues.push('Hook too long - aim for under 50 characters');\n        score -= 10;\n      }\n      break;\n      \n    case 'captions_burned':\n      // Check if video has captions\n      if (items[0].json.video && !items[0].json.has_captions) {\n        issues.push('Video needs burned-in captions for accessibility');\n        score -= 15;\n      }\n      break;\n      \n    case 'first_line_impact':\n      // Check if first line grabs attention\n      const firstLine = content.split('\\n')[0];\n      if (firstLine.length < 10 || !firstLine.match(/[!?]|\\b(you|your|discover|revealed|secret)\\b/i)) {\n        issues.push('First line needs more impact - use questions or power words');\n        score -= 10;\n      }\n      break;\n      \n    case 'emoji_spacing':\n      // Check emoji usage\n      const emojiCount = (content.match(/[\\u{1F300}-\\u{1F9FF}]/gu) || []).length;\n      if (platform === 'instagram' && emojiCount < 2) {\n        issues.push('Add more emojis for Instagram engagement');\n        score -= 5;\n      }\n      break;\n      \n    case 'professional_tone':\n      // Check for professional language\n      const casualWords = ['gonna', 'wanna', 'lol', 'omg', 'btw'];\n      const hasCasual = casualWords.some(word => content.toLowerCase().includes(word));\n      if (hasCasual) {\n        issues.push('Use more professional language for LinkedIn');\n        score -= 15;\n      }\n      break;\n      \n    case 'no_clickbait':\n      // Check for clickbait patterns\n      const clickbaitPatterns = ['you won\\'t believe', 'shocking', 'mind-blowing', 'number [0-9] will'];\n      const hasClickbait = clickbaitPatterns.some(pattern => \n        content.toLowerCase().match(new RegExp(pattern))\n      );\n      if (hasClickbait) {\n        issues.push('Avoid clickbait language on professional platforms');\n        score -= 20;\n      }\n      break;\n      \n    case 'under_250_chars':\n      if (content.length > 250) {\n        issues.push(`Content too long: ${content.length} chars (max 250)`);\n        score -= 10;\n      }\n      break;\n      \n    case 'natural_language':\n      // Check for natural flow\n      const hashtagCount = (content.match(/#/g) || []).length;\n      if (hashtagCount > 5) {\n        issues.push('Too many hashtags - keep it natural');\n        score -= 5;\n      }\n      break;\n      \n    case 'engagement_focused':\n      // Check for engagement elements\n      if (!content.includes('?') && !content.match(/what|how|why|share|comment/i)) {\n        issues.push('Add a question or call-to-action for engagement');\n        score -= 10;\n      }\n      break;\n      \n    case 'authentic':\n      // Check for overly promotional language\n      const promoWords = ['buy now', 'limited time', 'discount', 'sale', 'offer'];\n      const hasPromo = promoWords.some(word => content.toLowerCase().includes(word));\n      if (hasPromo && !items[0].json.is_promotional) {\n        issues.push('Content seems too promotional - be more authentic');\n        score -= 15;\n      }\n      break;\n  }\n});\n\n// Check platform limits\nObject.entries(limits).forEach(([key, limit]) => {\n  if (key === 'caption' && content.length > limit.value) {\n    issues.push(`Caption exceeds ${limit.value} ${limit.unit}`);\n    score -= 20;\n  }\n  if (key === 'hashtags') {\n    const hashtagCount = (content.match(/#\\w+/g) || []).length;\n    if (hashtagCount > limit.value) {\n      issues.push(`Too many hashtags: ${hashtagCount} (max ${limit.value})`);\n      score -= 10;\n    }\n  }\n});\n\nreturn [{\n  json: {\n    ...items[0].json,\n    quality_score: Math.max(0, score),\n    quality_issues: issues,\n    passed_quality_check: score >= 70,\n    needs_revision: score < 70\n  }\n}];"
+      },
+      "id": "3",
+      "name": "Quality Checks",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.passed_quality_check}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "4",
+      "name": "Passed QC?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Apply automatic fixes for common issues\nconst content = items[0].json.formatted_content;\nconst platform = items[0].json.platform;\nconst issues = items[0].json.quality_issues || [];\nlet fixedContent = content;\n\n// Auto-fix based on issues\nissues.forEach(issue => {\n  if (issue.includes('Caption exceeds')) {\n    // Trim to platform limit\n    const limit = items[0].json.publish_config.platformLimits.caption?.value || 1000;\n    fixedContent = fixedContent.substring(0, limit - 3) + '...';\n  }\n  \n  if (issue.includes('Too many hashtags')) {\n    // Limit hashtags\n    const maxHashtags = items[0].json.publish_config.platformLimits.hashtags?.value || 5;\n    const hashtags = fixedContent.match(/#\\w+/g) || [];\n    const limitedHashtags = hashtags.slice(0, maxHashtags);\n    // Remove all hashtags and add limited ones at the end\n    fixedContent = fixedContent.replace(/#\\w+/g, '').trim() + '\\n\\n' + limitedHashtags.join(' ');\n  }\n  \n  if (issue.includes('Add more emojis')) {\n    // Add relevant emojis\n    const emojiMap = {\n      'business': '💼',\n      'technology': '💻',\n      'food': '🍔',\n      'fitness': '💪',\n      'travel': '✈️',\n      'general': '✨'\n    };\n    const niche = items[0].json.niche || 'general';\n    const emoji = emojiMap[niche] || '✨';\n    fixedContent = `${emoji} ${fixedContent} ${emoji}`;\n  }\n  \n  if (issue.includes('Add a question')) {\n    // Add engagement question if missing\n    if (!fixedContent.includes('?')) {\n      fixedContent += '\\n\\nWhat are your thoughts on this?';\n    }\n  }\n  \n  if (issue.includes('professional language')) {\n    // Replace casual words\n    fixedContent = fixedContent\n      .replace(/\\bgonna\\b/gi, 'going to')\n      .replace(/\\bwanna\\b/gi, 'want to')\n      .replace(/\\blol\\b/gi, '')\n      .replace(/\\bomg\\b/gi, '')\n      .replace(/\\bbtw\\b/gi, 'by the way');\n  }\n});\n\n// Re-validate after fixes\nconst stillHasIssues = fixedContent.length > (items[0].json.publish_config.platformLimits.caption?.value || 10000);\n\nreturn [{\n  json: {\n    ...items[0].json,\n    formatted_content: fixedContent,\n    auto_fixed: true,\n    fixes_applied: issues.length,\n    ready_to_publish: !stillHasIssues\n  }\n}];"
+      },
+      "id": "5",
+      "name": "Auto-Fix Issues",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1050, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Prepare final payload for publishing\nconst platform = items[0].json.platform;\nconst content = items[0].json.formatted_content;\nconst mediaUrl = items[0].json.media_url;\nconst videoUrl = items[0].json.video_url;\nconst videoData = items[0].binary?.video;\n\n// Build platform-specific payload\nlet payload = {};\n\nswitch (platform) {\n  case 'tiktok':\n    payload = {\n      caption: content,\n      video: videoData || videoUrl,\n      thumbnail: items[0].json.thumbnail_url,\n      hashtags: (content.match(/#\\w+/g) || []).slice(0, 5),\n      music_id: items[0].json.trending_audio_id || null,\n      privacy: 'public'\n    };\n    break;\n    \n  case 'instagram':\n    payload = {\n      caption: content,\n      media_type: videoUrl ? 'REELS' : 'IMAGE',\n      media_url: mediaUrl || videoUrl,\n      thumbnail_url: items[0].json.thumbnail_url,\n      share_to_feed: true,\n      collaborators: [],\n      location_id: items[0].json.location_id || null\n    };\n    break;\n    \n  case 'twitter':\n    payload = {\n      text: content,\n      media_ids: mediaUrl ? [items[0].json.media_id] : [],\n      reply_settings: 'mentionedUsers'\n    };\n    break;\n    \n  case 'linkedin':\n    // LinkedIn uses different format for articles vs posts\n    const isArticle = content.length > 1300;\n    payload = {\n      author: `urn:li:person:${process.env.LINKEDIN_PERSON_ID}`,\n      lifecycleState: 'PUBLISHED',\n      specificContent: {\n        'com.linkedin.ugc.ShareContent': {\n          shareCommentary: {\n            text: content\n          },\n          shareMediaCategory: mediaUrl ? 'IMAGE' : 'NONE',\n          media: mediaUrl ? [{\n            status: 'READY',\n            media: mediaUrl\n          }] : []\n        }\n      },\n      visibility: {\n        'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC'\n      }\n    };\n    break;\n    \n  case 'youtube':\n    payload = {\n      snippet: {\n        title: items[0].json.title || content.substring(0, 100),\n        description: content,\n        tags: (content.match(/#\\w+/g) || []).map(tag => tag.substring(1)),\n        categoryId: '22' // People & Blogs\n      },\n      status: {\n        privacyStatus: 'public',\n        selfDeclaredMadeForKids: false\n      }\n    };\n    break;\n    \n  case 'facebook':\n    payload = {\n      message: content,\n      link: items[0].json.link || null,\n      picture: mediaUrl || null,\n      published: true\n    };\n    break;\n    \n  default:\n    payload = {\n      content: content,\n      media: mediaUrl || videoUrl || null\n    };\n}\n\n// Add scheduling if specified\nif (items[0].json.scheduled_time) {\n  payload.scheduled_publish_time = items[0].json.scheduled_time;\n  if (platform === 'facebook' || platform === 'instagram') {\n    payload.published = false;\n  }\n}\n\nreturn [{\n  json: {\n    ...items[0].json,\n    publish_payload: payload,\n    platform_endpoint: this.getPlatformEndpoint(platform),\n    ready_to_publish: true\n  },\n  binary: videoData ? { video: videoData } : {}\n}];\n\nfunction getPlatformEndpoint(platform) {\n  const endpoints = {\n    tiktok: '/tiktok/upload',\n    instagram: `https://graph.facebook.com/v12.0/${process.env.INSTAGRAM_ACCOUNT_ID}/media`,\n    twitter: 'https://api.twitter.com/2/tweets',\n    linkedin: 'https://api.linkedin.com/v2/ugcPosts',\n    youtube: 'https://www.googleapis.com/upload/youtube/v3/videos',\n    facebook: `https://graph.facebook.com/v12.0/me/feed`\n  };\n  return endpoints[platform] || '/publish';\n}"
+      },
+      "id": "6",
+      "name": "Build Payload",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "status",
+              "value": "formatted"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7",
+      "name": "Merge Paths",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [1450, 300]
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Get Format Template",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Format Template": {
+      "main": [
+        [
+          {
+            "node": "Quality Checks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quality Checks": {
+      "main": [
+        [
+          {
+            "node": "Passed QC?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Passed QC?": {
+      "main": [
+        [
+          {
+            "node": "Build Payload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Auto-Fix Issues",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto-Fix Issues": {
+      "main": [
+        [
+          {
+            "node": "Build Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Payload": {
+      "main": [
+        [
+          {
+            "node": "Merge Paths",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "formatter-v1",
+  "id": "PublisherFormatter",
+  "meta": {
+    "instanceId": "8c8c5237b8e37b006a7adce87f4369350c58e41f3ca501d19b1e4d58e6ab5126"
+  },
+  "tags": ["formatting", "publishing", "subworkflow"]
+}
